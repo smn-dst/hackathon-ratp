@@ -1,0 +1,31 @@
+{
+  "name": "signal-ratp",
+  "type": "module",
+  "private": true,
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "nuxt build",
+    "dev": "nuxt dev",
+    "generate": "nuxt generate",
+    "preview": "nuxt preview",
+    "postinstall": "nuxt prepare"
+  },
+  "dependencies": {
+    "@nuxtjs/supabase": "^2.0.4",
+    "@supabase/supabase-js": "^2.101.0",
+    "chart.js": "^4.5.1",
+    "leaflet": "^1.9.4",
+    "nuxt": "^4.4.2",
+    "openai": "^6.33.0",
+    "qrcode": "^1.5.4",
+    "vue": "^3.5.31",
+    "vue-chartjs": "^5.3.3",
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "@types/leaflet": "^1.9.21",
+    "@types/qrcode": "^1.5.6"
+  }
+}
