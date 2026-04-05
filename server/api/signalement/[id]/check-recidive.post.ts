@@ -73,8 +73,6 @@ export default defineEventHandler(async (event) => {
 
     let n8nResponse: RecidiveApiResponse
     try {
-        // n8n : souvent $('Webhook').first().json.body.matricule — on duplique sous `body`.
-        // Corps plat : si le nœud lit $json.matricule, c’est aussi renseigné.
         n8nResponse = await $fetch<RecidiveApiResponse>(n8nWebhookUrl, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -86,9 +84,8 @@ export default defineEventHandler(async (event) => {
         if (status === 404) {
             throw createError({
                 statusCode: 502,
-                statusMessage: 'Webhook n8n introuvable',
-                message:
-                    'Le webhook n8n répond 404. Vérifie dans n8n : workflow actif, URL production, méthode POST.',
+                statusMessage: 'Service récidive indisponible',
+                message: 'Réponse 404 : URL ou configuration du webhook incorrecte.',
             })
         }
         console.error('[check-recidive] n8n:', status, err.data?.message || err.message || e)

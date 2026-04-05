@@ -1,3 +1,18 @@
+:root {
+  --ratp-blue: #004fa3;
+  --ratp-teal: #4bc0ad;
+  --ratp-white: #ffffff;
+}
+
 body {
   margin: 0;
+}
+
+.brand-mark-header {
+  height: 34px;
+  width: auto;
+  max-width: 120px;
+  display: block;
+  object-fit: contain;
+  flex-shrink: 0;
 }

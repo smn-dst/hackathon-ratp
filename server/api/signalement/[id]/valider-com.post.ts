@@ -1,13 +1,9 @@
-// server/api/signalement/[id]/valider-com.post.ts
-// Valide ou rejette un signalement social depuis le dashboard COM
-
 import { createClient } from '@supabase/supabase-js'
 
 export default defineEventHandler(async (event) => {
   const id   = getRouterParam(event, 'id')
   const body = await readBody(event)
   const { action, user_id } = body
-  // action: 'valider' | 'rejeter'
 
   if (!id || !action) {
     throw createError({ statusCode: 400, message: 'id et action requis' })

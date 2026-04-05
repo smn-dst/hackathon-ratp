@@ -1,7 +1,3 @@
-// server/api/signalements-com.get.ts
-// Retourne les signalements Twitter/TikTok pour le dashboard COM.
-// Colonne URL du post : lien_social (à utiliser aussi dans n8n / REST, pas lien_source).
-
 import { createClient } from '@supabase/supabase-js'
 
 export default defineEventHandler(async () => {

@@ -21,20 +21,15 @@ const mailSujet = ref('')
 const mailMode = ref(false)
 const mailEnvoye = ref(false)
 
-//  'prise_en_compte'   → accusé réception voyageur     (statut: nouveau)
-//  'matricule'         → saisie matricule chauffeur     (statut: en_cours, matricule_agent null)
-//  'agent_recidive'    → récidive → mail chauffeur      (statut: en_cours, recidive = true)
-//  'agent_no_recidive' → pas de récidive, info seule   (statut: en_cours, recidive = false)
-//  'traite'            → mail clôture voyageur          (statut: en_cours, agent step terminé)
 const mailPhase = ref('prise_en_compte')
 
 const matriculeAgent = ref('')
 const matriculeLoading = ref(false)
 const matriculeCheckError = ref('')
 const recidiveResult = ref(null)
-const emailAgent = ref('')      // champ email chauffeur (saisi par le RH)
-const mailAgentSujet = ref('')      // sujet mail chauffeur (généré par IA)
-const mailAgentCorps = ref('')      // corps mail chauffeur (généré par IA, éditable)
+const emailAgent = ref('')
+const mailAgentSujet = ref('')
+const mailAgentCorps = ref('')
 const mailAgentEnvoye = ref(false)
 
 const estVerrouille = (s) =>
@@ -115,7 +110,6 @@ function ouvrirFiche(s) {
   }
 
   if (s.statut === 'nouveau') {
-    // ➜ Jamais encore pris en charge
     mailPhase.value = 'prise_en_compte'
 
   } else if (s.statut === 'en_cours') {
@@ -142,9 +136,6 @@ function fermerFiche() {
   setTimeout(() => { ficheActive.value = null }, 300)
 }
 
-// ÉTAPE 1 — Prendre en charge (statut nouveau)
-// ➜ Affiche le draft accusé réception — statut NE CHANGE PAS encore
-// ➜ Le PATCH en_cours se fera dans envoyerMail() après envoi confirmé
 async function prendreEnCharge() {
   if (!ficheActive.value) return
   actionLoading.value = true
@@ -159,11 +150,6 @@ async function prendreEnCharge() {
   }
 }
 
-// ÉTAPE 2 — Valider le matricule
-// ➜ PATCH matricule_agent en BDD
-// ➜ Appel /api/signalement/:id/check-recidive → déclenche n8n
-// ➜ n8n retourne : { recidive, mail_agent_sujet?, mail_agent_corps? }
-// ➜ n8n PATCH aussi recidive + mail_agent_sujet + mail_agent_corps en BDD
 async function validerMatricule() {
   if (!ficheActive.value || !matriculeAgent.value.trim()) return
   matriculeLoading.value = true
@@ -195,10 +181,6 @@ async function validerMatricule() {
   }
 }
 
-// ÉTAPE 3 — Envoyer mail au chauffeur (cas récidive uniquement)
-// ➜ Envoie le mail via Brevo
-// ➜ PATCH email_agent + agent_traite = true en BDD
-// ➜ Statut RESTE en_cours — RATP gère en interne
 async function envoyerMailAgent() {
   if (!ficheActive.value || !emailAgent.value.trim()) return
   actionLoading.value = true
@@ -213,18 +195,15 @@ async function envoyerMailAgent() {
       }
     })
 
-    // Persister email_agent + marquer l'étape agent comme terminée
     await $fetch(`/api/signalement/${ficheActive.value.id}/statut`, {
       method: 'PATCH',
       body: {
         email_agent: emailAgent.value.trim(),
         agent_traite: true
-        // statut INCHANGÉ → reste en_cours
       }
     })
 
     mailAgentEnvoye.value = true
-    // Phase traite = prêt pour clôturer plus tard
     mailPhase.value = 'traite'
     await refresh()
   } finally {
@@ -232,9 +211,6 @@ async function envoyerMailAgent() {
   }
 }
 
-// ÉTAPE 3 (cas pas de récidive) — Confirmer lecture
-// ➜ Pas de mail à envoyer, PATCH agent_traite = true
-// ➜ Phase → traite (bouton clôturer disponible)
 async function confirmerPasDeRecidive() {
   if (!ficheActive.value) return
   actionLoading.value = true
@@ -250,19 +226,14 @@ async function confirmerPasDeRecidive() {
   }
 }
 
-// ÉTAPE 4 — Clôturer le signalement (quand RATP a fini en interne)
-// ➜ Affiche le draft clôture voyageur — statut NE CHANGE PAS encore
-// ➜ Le PATCH traité se fera dans envoyerMail() après envoi confirmé
 async function genererMailCloture() {
   if (!ficheActive.value) return
   mailSujet.value = ficheActive.value.mail_voyageur_sujet_cloture
     || `Clôture de votre signalement du ${formatDate(ficheActive.value.heure_incident)} — Ligne ${formatLigne(ficheActive.value)}`
   mailPropose.value = ficheActive.value.mail_voyageur_draft_cloture || genFallbackCloture(ficheActive.value)
   mailMode.value = true
-  // mailPhase reste 'traite' → envoyerMail() sait qu'il faut patcher traité
 }
 
-// Rejeter
 async function refuser() {
   if (!ficheActive.value) return
   actionLoading.value = true
@@ -277,14 +248,10 @@ async function refuser() {
   }
 }
 
-// ENVOYER MAIL VOYAGEUR — Brevo d'abord, PUIS PATCH statut
-//  mailPhase 'prise_en_compte' → statut en_cours → enchaîne sur 'matricule'
-//  mailPhase 'traite'          → statut traité   → clôture définitive
 async function envoyerMail() {
   if (!ficheActive.value) return
   actionLoading.value = true
   try {
-    // 1️⃣ Envoyer le mail au voyageur via Brevo
     await $fetch(`/api/signalement/${ficheActive.value.id}/envoyer-mail`, {
       method: 'POST',
       body: {
@@ -295,9 +262,7 @@ async function envoyerMail() {
       }
     })
 
-    // 2️⃣ PATCH statut selon la phase en cours
     if (mailPhase.value === 'traite') {
-      // Dernier mail → on clôture définitivement
       await $fetch(`/api/signalement/${ficheActive.value.id}/statut`, {
         method: 'PATCH', body: { statut: 'traité' }
       })
@@ -309,7 +274,6 @@ async function envoyerMail() {
       if (next) ficheActive.value = next
 
     } else {
-      // Premier mail (prise_en_compte) → statut en_cours + enchaîner sur saisie matricule
       await $fetch(`/api/signalement/${ficheActive.value.id}/statut`, {
         method: 'PATCH', body: { statut: 'en_cours', pris_en_charge_par: monId.value }
       })
@@ -319,7 +283,6 @@ async function envoyerMail() {
       const id = ficheActive.value.id
       const next = signalements.value?.find(s => s.id === id)
       if (next) ficheActive.value = next
-      // La modale reste ouverte, on passe à la phase matricule
       mailPhase.value = 'matricule'
     }
   } finally {
@@ -332,21 +295,14 @@ const courriersByStatut = (statut) => (courriers.value || []).filter(c => c.stat
 <template>
   <div class="dash">
 
-    <!-- HEADER -->
     <header class="header">
       <div class="hbrand">
-        <div class="logo-c">
-          <svg width="18" height="18" viewBox="0 0 28 28" fill="none">
-            <circle cx="14" cy="14" r="13" stroke="white" stroke-width="2" />
-            <path d="M8 14 Q14 6 20 14 Q14 22 8 14Z" fill="white" opacity="0.9" />
-          </svg>
-        </div>
-        <span class="btext"><span class="bs">Signal</span><span class="br">RATP</span></span>
+        <img src="/branding/ratp-mark.png" alt="RATP" class="brand-mark-header" width="120" height="34" />
+        <span class="btext"><span class="bv">Vigie</span><span class="br">RATP</span></span>
         <div class="bsep" />
         <span class="role-pill">⚖️ RH / Juridique</span>
       </div>
 
-      <!-- Météo compacte -->
       <div class="hmeteo" v-if="meteo">
         <div class="hm-icon">
           <span v-if="condition === 'soleil'">☀️</span>
@@ -362,7 +318,6 @@ const courriersByStatut = (statut) => (courriers.value || []).filter(c => c.stat
         </div>
       </div>
 
-      <!-- Alertes -->
       <div class="hcenter">
         <Transition name="fade">
           <div v-if="alertesUrgentes.length > 0" class="alerte-banner">
@@ -383,7 +338,6 @@ const courriersByStatut = (statut) => (courriers.value || []).filter(c => c.stat
       <button class="btn-deconnexion" @click="deconnexion">Déconnexion</button>
     </header>
 
-    <!-- STATS ROW -->
     <div class="stats-row">
       <div class="sc sc-eleve"><span class="sn">{{ countEleve }}</span><span class="sl">Cas élevés</span></div>
       <div class="sc sc-moyen"><span class="sn">{{ countMoyen }}</span><span class="sl">Cas moyens</span></div>
@@ -392,7 +346,6 @@ const courriersByStatut = (statut) => (courriers.value || []).filter(c => c.stat
       <div class="sc sc-done"><span class="sn">{{ traites.length }}</span><span class="sl">Traités</span></div>
       <div class="sc sc-courr"><span class="sn">{{ courriers?.length || 0 }}</span><span class="sl">Courriers
           générés</span></div>
-      <!-- Mini chart -->
       <div class="sc sc-chart">
         <div class="chart-mini">
           <div v-for="bar in [{ c: countEleve, col: '#e24b4a' }, { c: countMoyen, col: '#f59e0b' }]" :key="bar.col"
@@ -406,10 +359,8 @@ const courriersByStatut = (statut) => (courriers.value || []).filter(c => c.stat
       </div>
     </div>
 
-    <!-- 3 COLONNES -->
     <div class="kanban">
 
-      <!-- NOUVEAUX -->
       <div class="kcol">
         <div class="ch ch-n">
           <span class="cht">Nouveaux</span>
@@ -444,7 +395,6 @@ const courriersByStatut = (statut) => (courriers.value || []).filter(c => c.stat
         </div>
       </div>
 
-      <!-- EN COURS -->
       <div class="kcol">
         <div class="ch ch-e">
           <span class="cht">En cours</span>
@@ -479,7 +429,6 @@ const courriersByStatut = (statut) => (courriers.value || []).filter(c => c.stat
         </div>
       </div>
 
-      <!-- TRAITÉS -->
       <div class="kcol">
         <div class="ch ch-t">
           <span class="cht">Traités</span>
@@ -515,17 +464,13 @@ const courriersByStatut = (statut) => (courriers.value || []).filter(c => c.stat
 
     </div>
 
-    <!-- MODAL FICHE -->
-    <!-- Overlay -->
     <Transition name="fade">
       <div v-if="ficheOuverte" class="modal-overlay" @click.self="fermerFiche" />
     </Transition>
 
-    <!-- Modale -->
     <Transition name="slide-up">
       <div v-if="ficheOuverte && ficheActive" class="modal">
 
-        <!-- ── HEADER ─────────────────────────────────────────────────────────── -->
         <div class="modal-header" :style="`--accent: ${graviteColor(ficheActive.gravite)}`">
           <div class="modal-header-left">
             <span class="badge-gravite"
@@ -540,11 +485,8 @@ const courriersByStatut = (statut) => (courriers.value || []).filter(c => c.stat
           </div>
         </div>
 
-        <!-- ── BODY ───────────────────────────────────────────────────────────── -->
         <div class="modal-body">
 
-          <!-- ─ PHASE : prise_en_compte ──────────────────────────────────────── -->
-          <!-- Affichage de la fiche signalement + bouton prendre en charge -->
           <template v-if="!mailMode && mailPhase === 'prise_en_compte'">
             <p class="section-label">DESCRIPTION DU VOYAGEUR</p>
             <p class="description-text">{{ ficheActive.description }}</p>
@@ -569,7 +511,6 @@ const courriersByStatut = (statut) => (courriers.value || []).filter(c => c.stat
             </div>
           </template>
 
-          <!-- ─ PHASE : verrouille ─────────────────────────────────────────────────── -->
           <template v-if="mailPhase === 'verrouille'">
             <div class="phase-block">
               <div class="verrouille-banner">
@@ -598,8 +539,6 @@ const courriersByStatut = (statut) => (courriers.value || []).filter(c => c.stat
             </div>
           </template>
 
-          <!-- ─ PHASE : mail voyageur (prise_en_compte ou clôture) ───────────── -->
-          <!-- S'affiche quand mailMode = true, quelque soit la phase -->
           <template v-if="mailMode">
             <p class="section-label">
               {{ mailPhase === 'traite' ? 'MAIL DE CLÔTURE AU VOYAGEUR' : 'MAIL DE PRISE EN COMPTE AU VOYAGEUR' }}
@@ -609,7 +548,6 @@ const courriersByStatut = (statut) => (courriers.value || []).filter(c => c.stat
             <textarea v-model="mailPropose" class="mail-textarea" rows="10" />
           </template>
 
-          <!-- ─ PHASE : matricule ─────────────────────────────────────────────── -->
           <template v-if="!mailMode && mailPhase === 'matricule'">
             <div class="phase-block">
               <div class="phase-icon">🪪</div>
@@ -628,7 +566,6 @@ const courriersByStatut = (statut) => (courriers.value || []).filter(c => c.stat
             </div>
           </template>
 
-          <!-- ─ PHASE : agent_recidive ────────────────────────────────────────── -->
           <template v-if="!mailMode && mailPhase === 'agent_recidive'">
             <div class="phase-block">
               <div class="recidive-banner">
@@ -649,7 +586,6 @@ const courriersByStatut = (statut) => (courriers.value || []).filter(c => c.stat
             </div>
           </template>
 
-          <!-- ─ PHASE : agent_no_recidive ─────────────────────────────────────── -->
           <template v-if="!mailMode && mailPhase === 'agent_no_recidive'">
             <div class="phase-block">
               <div class="no-recidive-banner">
@@ -672,7 +608,6 @@ const courriersByStatut = (statut) => (courriers.value || []).filter(c => c.stat
             </div>
           </template>
 
-          <!-- ─ PHASE : traite (en attente de clôture) ─────────────────────────── -->
           <template v-if="!mailMode && mailPhase === 'traite' && ficheActive.statut !== 'traité'">
             <div class="phase-block">
               <div class="traite-banner">
@@ -688,7 +623,6 @@ const courriersByStatut = (statut) => (courriers.value || []).filter(c => c.stat
             </div>
           </template>
 
-          <!-- ─ PHASE : traite (signalement déjà traité) ───────────────────────── -->
           <template v-if="!mailMode && mailPhase === 'traite' && ficheActive.statut === 'traité'">
             <div class="phase-block">
               <div class="no-recidive-banner">
@@ -701,12 +635,10 @@ const courriersByStatut = (statut) => (courriers.value || []).filter(c => c.stat
             </div>
           </template>
 
-        </div><!-- /modal-body -->
+        </div>
 
-        <!-- ── FOOTER ─────────────────────────────────────────────────────────── -->
         <div class="modal-footer">
 
-          <!-- Prise en charge -->
           <template v-if="!mailMode && mailPhase === 'prise_en_compte'">
             <button class="btn-primary" :disabled="actionLoading" @click="prendreEnCharge">
               <span v-if="actionLoading" class="spinner-btn" />
@@ -717,12 +649,10 @@ const courriersByStatut = (statut) => (courriers.value || []).filter(c => c.stat
             </button>
           </template>
 
-          <!-- Verrouillé → bouton fermer uniquement -->
           <template v-if="mailPhase === 'verrouille'">
             <button class="btn-secondary" @click="fermerFiche">Fermer</button>
           </template>
 
-          <!-- Mail voyageur -->
           <template v-if="mailMode">
             <button class="btn-primary" :disabled="actionLoading" @click="envoyerMail">
               <span v-if="actionLoading" class="spinner-btn" />
@@ -733,7 +663,6 @@ const courriersByStatut = (statut) => (courriers.value || []).filter(c => c.stat
             </button>
           </template>
 
-          <!-- Matricule -->
           <template v-if="!mailMode && mailPhase === 'matricule'">
             <button class="btn-primary" :disabled="matriculeLoading || !matriculeAgent.trim()"
               @click="validerMatricule">
@@ -745,7 +674,6 @@ const courriersByStatut = (statut) => (courriers.value || []).filter(c => c.stat
             </button>
           </template>
 
-          <!-- Récidive → envoyer mail agent -->
           <template v-if="!mailMode && mailPhase === 'agent_recidive'">
             <button class="btn-primary" :disabled="actionLoading || !emailAgent.trim()" @click="envoyerMailAgent">
               <span v-if="actionLoading" class="spinner-btn" />
@@ -753,7 +681,6 @@ const courriersByStatut = (statut) => (courriers.value || []).filter(c => c.stat
             </button>
           </template>
 
-          <!-- Pas de récidive → confirmer -->
           <template v-if="!mailMode && mailPhase === 'agent_no_recidive'">
             <button class="btn-primary" :disabled="actionLoading" @click="confirmerPasDeRecidive">
               <span v-if="actionLoading" class="spinner-btn" />
@@ -761,7 +688,6 @@ const courriersByStatut = (statut) => (courriers.value || []).filter(c => c.stat
             </button>
           </template>
 
-          <!-- Prêt pour clôture -->
           <template v-if="!mailMode && mailPhase === 'traite' && ficheActive.statut !== 'traité'">
             <button class="btn-primary" :disabled="actionLoading" @click="genererMailCloture">
               <span v-if="actionLoading" class="spinner-btn" />
@@ -769,7 +695,7 @@ const courriersByStatut = (statut) => (courriers.value || []).filter(c => c.stat
             </button>
           </template>
 
-        </div><!-- /modal-footer -->
+        </div>
       </div>
     </Transition>
 
@@ -796,7 +722,7 @@ const courriersByStatut = (statut) => (courriers.value || []).filter(c => c.stat
 }
 
 .header {
-  background: #1b3f8b;
+  background: #004fa3;
   padding: 0 20px;
   height: 64px;
   display: flex;
@@ -812,22 +738,12 @@ const courriersByStatut = (statut) => (courriers.value || []).filter(c => c.stat
   flex-shrink: 0;
 }
 
-.logo-c {
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
-  background: #00a88f;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
 .btext {
   display: flex;
   gap: 2px;
 }
 
-.bs {
+.bv {
   font-size: 15px;
   font-weight: 700;
   color: #fff;
@@ -836,7 +752,7 @@ const courriersByStatut = (statut) => (courriers.value || []).filter(c => c.stat
 .br {
   font-size: 15px;
   font-weight: 700;
-  color: #00a88f;
+  color: #4bc0ad;
 }
 
 .bsep {
@@ -1030,7 +946,7 @@ const courriersByStatut = (statut) => (courriers.value || []).filter(c => c.stat
 }
 
 .btn-deconnexion:focus-visible {
-  outline: 2px solid #00a88f;
+  outline: 2px solid #4bc0ad;
   outline-offset: 2px;
 }
 
@@ -1102,21 +1018,21 @@ const courriersByStatut = (statut) => (courriers.value || []).filter(c => c.stat
 }
 
 .sc-done {
-  border-top: 3px solid #00a88f;
+  border-top: 3px solid #4bc0ad;
   flex: 0.8;
 }
 
 .sc-done .sn {
-  color: #00a88f;
+  color: #4bc0ad;
 }
 
 .sc-courr {
-  border-top: 3px solid #1b3f8b;
+  border-top: 3px solid #004fa3;
   flex: 0.8;
 }
 
 .sc-courr .sn {
-  color: #1b3f8b;
+  color: #004fa3;
 }
 
 .sc-chart {
@@ -1224,7 +1140,7 @@ const courriersByStatut = (statut) => (courriers.value || []).filter(c => c.stat
 }
 
 .ch-t .cht {
-  color: #00a88f;
+  color: #4bc0ad;
 }
 
 .kcards {
@@ -1319,7 +1235,7 @@ const courriersByStatut = (statut) => (courriers.value || []).filter(c => c.stat
   padding: 1px 6px;
   border-radius: 999px;
   background: rgba(0, 168, 143, 0.1);
-  color: #00a88f;
+  color: #4bc0ad;
   flex-shrink: 0;
   white-space: nowrap;
 }
@@ -1329,7 +1245,7 @@ const courriersByStatut = (statut) => (courriers.value || []).filter(c => c.stat
   padding: 1px 6px;
   border-radius: 999px;
   background: rgba(0, 168, 143, 0.1);
-  color: #00a88f;
+  color: #4bc0ad;
   flex-shrink: 0;
 }
 

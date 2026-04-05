@@ -28,13 +28,6 @@ const mailSujet = ref('')
 const mailMode = ref(false)
 const mailEnvoye = ref(false)
 
-//  'prise_en_compte'   → accusé réception voyageur        (statut: nouveau)
-//  'matricule'         → saisie matricule chauffeur        (statut: en_cours, gravite: faible)
-//  'matricule_positif' → saisie matricule pour féliciter   (statut: en_cours, gravite: positif)
-//  'agent_recidive'    → récidive → mail chauffeur         (faible seulement)
-//  'agent_no_recidive' → pas de récidive                   (faible seulement)
-//  'agent_feliciter'   → mail de félicitations optionnel   (positif seulement)
-//  'traite'            → mail clôture voyageur             (agent_traite = true)
 const mailPhase = ref('prise_en_compte')
 
 const matriculeAgent = ref('')
@@ -102,14 +95,13 @@ const totalSignalements = computed(() => signalements.value?.length || 0)
 const barMax = computed(() => Math.max(countEleve.value, countMoyen.value, countFaible.value, countPositif.value, 1))
 const alertesUrgentes = computed(() => signalements.value?.filter(s => s.gravite === 'élevé' && s.statut === 'nouveau') || [])
 
-const graviteColor = g => ({ 'élevé': '#e24b4a', 'moyen': '#f59e0b', 'faible': '#3b82f6', 'positif': '#00a88f' }[g] || '#888')
+const graviteColor = g => ({ 'élevé': '#e24b4a', 'moyen': '#f59e0b', 'faible': '#3b82f6', 'positif': '#4bc0ad' }[g] || '#888')
 const estPositif = computed(() => ficheActive.value?.gravite === 'positif')
 const estGereRH = s => s.gravite === 'moyen' || s.gravite === 'élevé'
 
 function formatDate(iso) { return new Date(iso).toLocaleDateString('fr-FR') }
 function formatLigne(s) { return s.ligne_id?.replace('L', '') || s.ligne || '—' }
 
-// Fallbacks locaux — voyageur
 function genFallback(s) {
   if (s.gravite === 'positif') {
     return `Madame, Monsieur ${s.voyageur_prenom || ''} ${s.voyageur_nom || ''},\n\nNous avons bien reçu votre retour positif du ${formatDate(s.heure_incident)} concernant un agent sur la ligne ${formatLigne(s)}.\n\nVotre témoignage a été transmis et sera valorisé. Nous vous remercions pour ce retour encourageant.\n\nCordialement,\nLe Manager du Centre Bus RATP`
@@ -123,7 +115,6 @@ function genFallbackCloture(s) {
   return `Madame, Monsieur ${s.voyageur_prenom || ''} ${s.voyageur_nom || ''},\n\nNous vous informons que votre signalement du ${formatDate(s.heure_incident)} sur la ligne ${formatLigne(s)} a été traité.\n\nToutes les mesures nécessaires ont été prises. Nous vous remercions pour votre vigilance.\n\nCordialement,\nLe Manager du Centre Bus RATP`
 }
 
-// Fallback félicitations agent
 function genFallbackFelicitations(s) {
   return `Madame, Monsieur,\n\nNous avons reçu un retour très positif d'un voyageur vous concernant, survenu le ${formatDate(s.heure_incident)} sur la ligne ${formatLigne(s)}.\n\nVotre attitude exemplaire a été remarquée et nous tenons à vous en féliciter. Continuez ainsi !\n\nCordialement,\nLe Manager du Centre Bus RATP`
 }
@@ -163,13 +154,10 @@ function ouvrirFiche(s) {
 
     if (positif) {
       if (!s.agent_id) {
-        // Matricule pas encore saisi → proposer de féliciter l'agent
         mailPhase.value = 'matricule_positif'
       } else if (s.agent_traite) {
-        // Agent félicité (ou ignoré) → prêt pour clôture voyageur
         mailPhase.value = 'traite'
       } else {
-        // Matricule saisi, félicitations pas encore envoyées
         mailPhase.value = 'agent_feliciter'
         mailAgentSujet.value = s.mail_agent_sujet || ''
         mailAgentCorps.value = s.mail_agent_corps || genFallbackFelicitations(s)
@@ -204,9 +192,6 @@ function fermerFiche() {
   setTimeout(() => { ficheActive.value = null }, 300)
 }
 
-// ÉTAPE 1 — Prendre en charge (statut nouveau)
-// ➜ Affiche le draft accusé réception — statut NE CHANGE PAS encore
-// ➜ Le PATCH en_cours se fera dans envoyerMail() après envoi confirmé
 async function prendreEnCharge() {
   if (!ficheActive.value) return
   actionLoading.value = true
@@ -221,8 +206,6 @@ async function prendreEnCharge() {
   }
 }
 
-// ÉTAPE 2A — Valider le matricule (flux FAIBLE)
-// ➜ PATCH matricule_agent + appel webhook n8n récidive
 async function validerMatricule() {
   if (!ficheActive.value || !matriculeAgent.value.trim()) return
   matriculeLoading.value = true
@@ -254,9 +237,6 @@ async function validerMatricule() {
   }
 }
 
-// ÉTAPE 2B — Valider le matricule (flux POSITIF)
-// ➜ Pas de check récidive → prépare mail de félicitations
-// ➜ PATCH matricule_agent en BDD
 async function validerMatriculePositif() {
   if (!ficheActive.value || !matriculeAgent.value.trim()) return
   matriculeLoading.value = true
@@ -266,7 +246,6 @@ async function validerMatriculePositif() {
       body: { matricule_agent: matriculeAgent.value.trim() }
     })
 
-    // Préparer le mail de félicitations (fallback local, pas d'IA nécessaire)
     mailAgentSujet.value = ficheActive.value.mail_agent_sujet
       || `Félicitations — Retour positif d'un voyageur — Ligne ${formatLigne(ficheActive.value)}`
     mailAgentCorps.value = ficheActive.value.mail_agent_corps || genFallbackFelicitations(ficheActive.value)
@@ -278,9 +257,6 @@ async function validerMatriculePositif() {
   }
 }
 
-// ÉTAPE 3A — Envoyer mail au chauffeur (récidive détectée)
-// ➜ Brevo → PATCH email_agent + agent_traite = true
-// ➜ Statut RESTE en_cours
 async function envoyerMailAgent() {
   if (!ficheActive.value || !emailAgent.value.trim()) return
   actionLoading.value = true
@@ -308,9 +284,6 @@ async function envoyerMailAgent() {
   }
 }
 
-// ÉTAPE 3B — Envoyer mail de félicitations au chauffeur (flux positif)
-// ➜ Même logique que 3A mais tonalité différente
-// ➜ Statut RESTE en_cours
 async function envoyerMailFelicitations() {
   if (!ficheActive.value || !emailAgent.value.trim()) return
   actionLoading.value = true
@@ -338,8 +311,6 @@ async function envoyerMailFelicitations() {
   }
 }
 
-// ÉTAPE 3B bis — Ignorer félicitations (positif, pas de matricule connu)
-// ➜ PATCH agent_traite = true sans envoyer de mail
 async function ignorerFelicitations() {
   if (!ficheActive.value) return
   actionLoading.value = true
@@ -355,8 +326,6 @@ async function ignorerFelicitations() {
   }
 }
 
-// ÉTAPE 3C — Pas de récidive (flux faible)
-// ➜ PATCH agent_traite = true, statut RESTE en_cours
 async function confirmerPasDeRecidive() {
   if (!ficheActive.value) return
   actionLoading.value = true
@@ -372,19 +341,14 @@ async function confirmerPasDeRecidive() {
   }
 }
 
-// ÉTAPE 4 — Clôturer le signalement
-// ➜ Affiche le draft clôture voyageur — statut NE CHANGE PAS encore
-// ➜ Le PATCH traité se fera dans envoyerMail() après envoi confirmé
 async function genererMailCloture() {
   if (!ficheActive.value) return
   mailSujet.value = ficheActive.value.mail_voyageur_sujet_cloture
     || `Clôture de votre signalement du ${formatDate(ficheActive.value.heure_incident)} — Ligne ${formatLigne(ficheActive.value)}`
   mailPropose.value = ficheActive.value.mail_voyageur_draft_cloture || genFallbackCloture(ficheActive.value)
   mailMode.value = true
-  // mailPhase reste 'traite' → envoyerMail() patche traité
 }
 
-// Rejeter
 async function refuser() {
   if (!ficheActive.value) return
   actionLoading.value = true
@@ -399,15 +363,10 @@ async function refuser() {
   }
 }
 
-// ENVOYER MAIL VOYAGEUR — Brevo d'abord, PUIS PATCH statut
-//  mailPhase 'prise_en_compte' → statut en_cours
-//            puis : positif → 'matricule_positif' / faible → 'matricule'
-//  mailPhase 'traite'          → statut traité (clôture définitive)
 async function envoyerMail() {
   if (!ficheActive.value) return
   actionLoading.value = true
   try {
-    // 1️⃣ Envoyer le mail au voyageur via Brevo
     await $fetch(`/api/signalement/${ficheActive.value.id}/envoyer-mail`, {
       method: 'POST',
       body: {
@@ -418,7 +377,6 @@ async function envoyerMail() {
       }
     })
 
-    // 2️⃣ PATCH statut selon la phase
     if (mailPhase.value === 'traite') {
       await $fetch(`/api/signalement/${ficheActive.value.id}/statut`, {
         method: 'PATCH', body: { statut: 'traité' }
@@ -431,7 +389,6 @@ async function envoyerMail() {
       if (next) ficheActive.value = next
 
     } else {
-      // prise_en_compte → statut en_cours, modale reste ouverte
       await $fetch(`/api/signalement/${ficheActive.value.id}/statut`, {
         method: 'PATCH', body: { statut: 'en_cours', pris_en_charge_par: monId.value }
       })
@@ -441,7 +398,6 @@ async function envoyerMail() {
       const id = ficheActive.value.id
       const next = signalements.value?.find(s => s.id === id)
       if (next) ficheActive.value = next
-      // Enchaîner sur la bonne phase selon la gravité
       mailPhase.value = estPositif.value ? 'matricule_positif' : 'matricule'
     }
   } finally {
@@ -520,16 +476,10 @@ function ouvrirFicheDepuisZone(s) {
 <template>
   <div class="dash">
 
-    <!-- HEADER -->
     <header class="header">
       <div class="header-brand">
-        <div class="logo-circle">
-          <svg width="20" height="20" viewBox="0 0 28 28" fill="none">
-            <circle cx="14" cy="14" r="13" stroke="white" stroke-width="2" />
-            <path d="M8 14 Q14 6 20 14 Q14 22 8 14Z" fill="white" opacity="0.9" />
-          </svg>
-        </div>
-        <span class="brand-text"><span class="brand-signal">Signal</span><span class="brand-ratp">RATP</span></span>
+        <img src="/branding/ratp-mark.png" alt="RATP" class="brand-mark-header" width="120" height="34" />
+        <span class="brand-text"><span class="brand-vigie">Vigie</span><span class="brand-ratp">RATP</span></span>
         <div class="brand-sep" />
         <span class="role-pill">Manager Centre Bus</span>
       </div>
@@ -555,13 +505,10 @@ function ouvrirFicheDepuisZone(s) {
       <button class="btn-deconnexion" @click="deconnexion">Déconnexion</button>
     </header>
 
-    <!-- MAIN 3 COLONNES -->
     <main class="main">
 
-      <!-- COLONNE GAUCHE : météo + carte -->
       <aside class="col-left">
 
-        <!-- Météo -->
         <div class="card meteo-card">
           <div class="meteo-anim">
             <div v-if="condition === 'soleil'" class="anim-soleil">
@@ -613,7 +560,6 @@ function ouvrirFicheDepuisZone(s) {
           </div>
         </div>
 
-        <!-- Carte -->
         <div class="card map-card">
           <div class="card-title">Carte des incidents</div>
           <div class="map-wrap">
@@ -643,13 +589,12 @@ function ouvrirFicheDepuisZone(s) {
             <span class="leg"><span class="dot" style="background:#e24b4a" />Élevé</span>
             <span class="leg"><span class="dot" style="background:#f59e0b" />Moyen</span>
             <span class="leg"><span class="dot" style="background:#3b82f6" />Faible</span>
-            <span class="leg"><span class="dot" style="background:#00a88f" />Positif</span>
+            <span class="leg"><span class="dot" style="background:#4bc0ad" />Positif</span>
           </div>
         </div>
 
       </aside>
 
-      <!-- COLONNE CENTRE : signalements -->
       <section class="col-center">
 
         <div class="card tabs-card">
@@ -716,7 +661,6 @@ function ouvrirFicheDepuisZone(s) {
 
       </section>
 
-      <!-- COLONNE DROITE : agents + chart -->
       <aside class="col-right">
 
         <div class="card agents-card">
@@ -748,7 +692,7 @@ function ouvrirFicheDepuisZone(s) {
               { label: 'Élevé', count: countEleve, color: '#e24b4a' },
               { label: 'Moyen', count: countMoyen, color: '#f59e0b' },
               { label: 'Faible', count: countFaible, color: '#3b82f6' },
-              { label: 'Positif', count: countPositif, color: '#00a88f' },
+              { label: 'Positif', count: countPositif, color: '#4bc0ad' },
             ]" :key="bar.label" class="bar-row">
               <span class="bar-label">{{ bar.label }}</span>
               <div class="bar-track">
@@ -765,18 +709,14 @@ function ouvrirFicheDepuisZone(s) {
       </aside>
     </main>
 
-    <!-- ═══════════════════════════════ MODAL ════════════════════════════════ -->
 
-    <!-- Overlay -->
     <Transition name="fade">
       <div v-if="ficheOuverte" class="modal-overlay" @click.self="fermerFiche" />
     </Transition>
 
-    <!-- Modale -->
     <Transition name="slide-up">
       <div v-if="ficheOuverte && ficheActive" class="modal">
 
-        <!-- ── HEADER ─────────────────────────────────────────────────────── -->
         <div class="modal-header" :style="`--accent: ${graviteColor(ficheActive.gravite)}`">
           <div class="modal-header-left">
             <span class="badge-gravite"
@@ -791,10 +731,8 @@ function ouvrirFicheDepuisZone(s) {
           </div>
         </div>
 
-        <!-- ── BODY ───────────────────────────────────────────────────────── -->
         <div class="modal-body">
 
-          <!-- ─ PHASE : rh_only — moyen / élevé, info seule ──────────────── -->
           <template v-if="mailPhase === 'rh_only'">
             <p class="section-label">DESCRIPTION DU VOYAGEUR</p>
             <p class="description-text">{{ ficheActive.description }}</p>
@@ -821,14 +759,13 @@ function ouvrirFicheDepuisZone(s) {
               <div>
                 <strong>Géré par le service RH / Juridique</strong>
                 <p>
-                  Ce signalement est de gravité <strong>{{ ficheActive.gravite }}</strong> — il est automatiquement
-                  transmis au service RH/Juridique pour traitement. Vous êtes informé à titre de suivi uniquement.
+                  Gravité <strong>{{ ficheActive.gravite }}</strong> : pris en charge par le service RH / Juridique.
+                  Affichage à titre informatif.
                 </p>
               </div>
             </div>
           </template>
 
-          <!-- ─ PHASE : prise_en_compte ─────────────────────────────────── -->
           <template v-if="!mailMode && mailPhase === 'prise_en_compte'">
             <p class="section-label">DESCRIPTION DU VOYAGEUR</p>
             <p class="description-text">{{ ficheActive.description }}</p>
@@ -852,7 +789,6 @@ function ouvrirFicheDepuisZone(s) {
             </div>
           </template>
 
-          <!-- ─ PHASE : mail voyageur ───────────────────────────────────── -->
           <template v-if="mailMode">
             <p class="section-label">
               {{ mailPhase === 'traite' ? 'MAIL DE CLÔTURE AU VOYAGEUR' : 'MAIL DE PRISE EN COMPTE AU VOYAGEUR' }}
@@ -862,7 +798,6 @@ function ouvrirFicheDepuisZone(s) {
             <textarea v-model="mailPropose" class="mail-textarea" rows="10" />
           </template>
 
-          <!-- ─ PHASE : matricule (flux FAIBLE) ────────────────────────── -->
           <template v-if="!mailMode && mailPhase === 'matricule'">
             <div class="phase-block">
               <div class="phase-icon">🪪</div>
@@ -881,7 +816,6 @@ function ouvrirFicheDepuisZone(s) {
             </div>
           </template>
 
-          <!-- ─ PHASE : matricule_positif (flux POSITIF) ───────────────── -->
           <template v-if="!mailMode && mailPhase === 'matricule_positif'">
             <div class="phase-block">
               <div class="phase-icon">🌟</div>
@@ -899,7 +833,6 @@ function ouvrirFicheDepuisZone(s) {
             </div>
           </template>
 
-          <!-- ─ PHASE : agent_recidive (flux FAIBLE) ───────────────────── -->
           <template v-if="!mailMode && mailPhase === 'agent_recidive'">
             <div class="phase-block">
               <div class="recidive-banner">
@@ -918,7 +851,6 @@ function ouvrirFicheDepuisZone(s) {
             </div>
           </template>
 
-          <!-- ─ PHASE : agent_no_recidive (flux FAIBLE) ────────────────── -->
           <template v-if="!mailMode && mailPhase === 'agent_no_recidive'">
             <div class="phase-block">
               <div class="no-recidive-banner">
@@ -941,7 +873,6 @@ function ouvrirFicheDepuisZone(s) {
             </div>
           </template>
 
-          <!-- ─ PHASE : agent_feliciter (flux POSITIF) ─────────────────── -->
           <template v-if="!mailMode && mailPhase === 'agent_feliciter'">
             <div class="phase-block">
               <div class="feliciter-banner">
@@ -960,7 +891,6 @@ function ouvrirFicheDepuisZone(s) {
             </div>
           </template>
 
-          <!-- ─ PHASE : traite — en attente de clôture ─────────────────── -->
           <template v-if="!mailMode && mailPhase === 'traite' && ficheActive.statut !== 'traité'">
             <div class="phase-block">
               <div class="traite-banner">
@@ -977,7 +907,6 @@ function ouvrirFicheDepuisZone(s) {
             </div>
           </template>
 
-          <!-- ─ PHASE : traite — signalement clôturé ───────────────────── -->
           <template v-if="!mailMode && mailPhase === 'traite' && ficheActive.statut === 'traité'">
             <div class="phase-block">
               <div class="no-recidive-banner">
@@ -990,7 +919,6 @@ function ouvrirFicheDepuisZone(s) {
             </div>
           </template>
 
-          <!-- ─ PHASE : verrouille ─────────────────────────────────────────────────── -->
           <template v-if="mailPhase === 'verrouille'">
             <div class="phase-block">
               <div class="verrouille-banner">
@@ -1019,19 +947,16 @@ function ouvrirFicheDepuisZone(s) {
             </div>
           </template>
 
-        </div><!-- /modal-body -->
+        </div>
 
-        <!-- ── FOOTER ─────────────────────────────────────────────────────── -->
         <div class="modal-footer">
 
-          <!-- rh_only → pas de bouton d'action, juste fermer -->
           <template v-if="mailPhase === 'rh_only'">
             <button class="btn-secondary" @click="fermerFiche">
               Fermer
             </button>
           </template>
 
-          <!-- prise_en_compte -->
           <template v-if="!mailMode && mailPhase === 'prise_en_compte'">
             <button class="btn-primary" :disabled="actionLoading" @click="prendreEnCharge">
               <span v-if="actionLoading" class="spinner-btn" />
@@ -1042,12 +967,10 @@ function ouvrirFicheDepuisZone(s) {
             </button>
           </template>
 
-          <!-- Verrouillé → bouton fermer uniquement -->
           <template v-if="mailPhase === 'verrouille'">
             <button class="btn-secondary" @click="fermerFiche">Fermer</button>
           </template>
 
-          <!-- mail voyageur -->
           <template v-if="mailMode">
             <button class="btn-primary" :disabled="actionLoading" @click="envoyerMail">
               <span v-if="actionLoading" class="spinner-btn" />
@@ -1058,7 +981,6 @@ function ouvrirFicheDepuisZone(s) {
             </button>
           </template>
 
-          <!-- matricule faible -->
           <template v-if="!mailMode && mailPhase === 'matricule'">
             <button class="btn-primary" :disabled="matriculeLoading || !matriculeAgent.trim()"
               @click="validerMatricule">
@@ -1070,7 +992,6 @@ function ouvrirFicheDepuisZone(s) {
             </button>
           </template>
 
-          <!-- matricule positif -->
           <template v-if="!mailMode && mailPhase === 'matricule_positif'">
             <button class="btn-success" :disabled="matriculeLoading || !matriculeAgent.trim()"
               @click="validerMatriculePositif">
@@ -1082,7 +1003,6 @@ function ouvrirFicheDepuisZone(s) {
             </button>
           </template>
 
-          <!-- récidive → envoyer mail chauffeur -->
           <template v-if="!mailMode && mailPhase === 'agent_recidive'">
             <button class="btn-danger-fill" :disabled="actionLoading || !emailAgent.trim()" @click="envoyerMailAgent">
               <span v-if="actionLoading" class="spinner-btn" />
@@ -1090,7 +1010,6 @@ function ouvrirFicheDepuisZone(s) {
             </button>
           </template>
 
-          <!-- pas de récidive → continuer -->
           <template v-if="!mailMode && mailPhase === 'agent_no_recidive'">
             <button class="btn-primary" :disabled="actionLoading" @click="confirmerPasDeRecidive">
               <span v-if="actionLoading" class="spinner-btn" />
@@ -1098,7 +1017,6 @@ function ouvrirFicheDepuisZone(s) {
             </button>
           </template>
 
-          <!-- félicitations → envoyer -->
           <template v-if="!mailMode && mailPhase === 'agent_feliciter'">
             <button class="btn-success" :disabled="actionLoading || !emailAgent.trim()"
               @click="envoyerMailFelicitations">
@@ -1110,7 +1028,6 @@ function ouvrirFicheDepuisZone(s) {
             </button>
           </template>
 
-          <!-- prêt pour clôture -->
           <template v-if="!mailMode && mailPhase === 'traite' && ficheActive.statut !== 'traité'">
             <button class="btn-primary" :disabled="actionLoading" @click="genererMailCloture">
               <span v-if="actionLoading" class="spinner-btn" />
@@ -1118,7 +1035,7 @@ function ouvrirFicheDepuisZone(s) {
             </button>
           </template>
 
-        </div><!-- /modal-footer -->
+        </div>
       </div>
     </Transition>
 
@@ -1175,7 +1092,7 @@ function ouvrirFicheDepuisZone(s) {
 }
 
 .header {
-  background: #1b3f8b;
+  background: #004fa3;
   padding: 0 24px;
   height: 56px;
   display: flex;
@@ -1191,23 +1108,12 @@ function ouvrirFicheDepuisZone(s) {
   flex-shrink: 0;
 }
 
-.logo-circle {
-  width: 36px;
-  height: 36px;
-  border-radius: 50%;
-  background: #00a88f;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-}
-
 .brand-text {
   display: flex;
   gap: 3px;
 }
 
-.brand-signal {
+.brand-vigie {
   font-size: 16px;
   font-weight: 700;
   color: #fff;
@@ -1216,7 +1122,7 @@ function ouvrirFicheDepuisZone(s) {
 .brand-ratp {
   font-size: 16px;
   font-weight: 700;
-  color: #00a88f;
+  color: #4bc0ad;
 }
 
 .brand-sep {
@@ -1324,7 +1230,7 @@ function ouvrirFicheDepuisZone(s) {
 }
 
 .btn-deconnexion:focus-visible {
-  outline: 2px solid #00a88f;
+  outline: 2px solid #4bc0ad;
   outline-offset: 2px;
 }
 
@@ -1406,7 +1312,7 @@ function ouvrirFicheDepuisZone(s) {
 .meteo-temp {
   font-size: 28px;
   font-weight: 700;
-  color: #1b3f8b;
+  color: #004fa3;
   line-height: 1;
 }
 
@@ -1598,8 +1504,8 @@ function ouvrirFicheDepuisZone(s) {
 }
 
 .tab.active {
-  background: #1b3f8b;
-  border-color: #1b3f8b;
+  background: #004fa3;
+  border-color: #004fa3;
   color: #fff;
 }
 
@@ -1640,12 +1546,12 @@ function ouvrirFicheDepuisZone(s) {
 
 .tab-count.traité {
   background: rgba(0, 168, 143, 0.15);
-  color: #00a88f;
+  color: #4bc0ad;
 }
 
 .tab:not(.active) .tab-count.traité {
   background: rgba(0, 168, 143, 0.12);
-  color: #00a88f;
+  color: #4bc0ad;
 }
 
 .tab-filters {
@@ -1669,7 +1575,7 @@ function ouvrirFicheDepuisZone(s) {
 }
 
 .f-select:focus {
-  border-color: #1b3f8b;
+  border-color: #004fa3;
 }
 
 .sig-list {
@@ -1871,7 +1777,7 @@ function ouvrirFicheDepuisZone(s) {
 .a-total {
   font-size: 12px;
   font-weight: 700;
-  color: #1b3f8b;
+  color: #004fa3;
 }
 
 .chart-card {
@@ -2564,7 +2470,7 @@ function ouvrirFicheDepuisZone(s) {
 }
 
 .btn-success {
-  background: #00a88f;
+  background: #4bc0ad;
   color: #fff;
   border: none;
   border-radius: 10px;

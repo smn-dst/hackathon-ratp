@@ -41,13 +41,8 @@ async function handleLogin() {
   <div class="login-dash">
     <header class="login-header">
       <div class="header-brand">
-        <div class="logo-circle">
-          <svg width="20" height="20" viewBox="0 0 28 28" fill="none" aria-hidden="true">
-            <circle cx="14" cy="14" r="13" stroke="white" stroke-width="2" />
-            <path d="M8 14 Q14 6 20 14 Q14 22 8 14Z" fill="white" opacity="0.9" />
-          </svg>
-        </div>
-        <span class="brand-text"><span class="brand-signal">Signal</span><span class="brand-ratp">RATP</span></span>
+        <img src="/branding/ratp-mark.png" alt="RATP" class="brand-mark-header" width="120" height="34" />
+        <span class="brand-text"><span class="brand-vigie">Vigie</span><span class="brand-ratp">RATP</span></span>
         <div class="brand-sep" />
         <span class="role-pill">Connexion</span>
       </div>
@@ -55,8 +50,11 @@ async function handleLogin() {
 
     <main class="login-main">
       <div class="card login-card">
+        <div class="login-brand-lockup">
+          <img src="/branding/ratp-reseaux-surface.png" alt="RATP Réseaux de surface" class="login-lockup-img" />
+        </div>
         <h1 class="login-title">Connexion</h1>
-        <p class="login-sub">Accédez à votre espace de gestion des signalements</p>
+        <p class="login-sub">Espace de gestion des signalements — Paris Est Centre Bus</p>
 
         <form class="form" @submit.prevent="handleLogin">
           <div class="field">
@@ -149,7 +147,7 @@ async function handleLogin() {
 }
 
 .login-header {
-  background: #1b3f8b;
+  background: #004fa3;
   padding: 0 24px;
   height: 56px;
   display: flex;
@@ -163,23 +161,12 @@ async function handleLogin() {
   gap: 10px;
 }
 
-.logo-circle {
-  width: 36px;
-  height: 36px;
-  border-radius: 50%;
-  background: #00a88f;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-}
-
 .brand-text {
   display: flex;
   gap: 3px;
 }
 
-.brand-signal {
+.brand-vigie {
   font-size: 16px;
   font-weight: 700;
   color: #fff;
@@ -188,7 +175,7 @@ async function handleLogin() {
 .brand-ratp {
   font-size: 16px;
   font-weight: 700;
-  color: #00a88f;
+  color: #4bc0ad;
 }
 
 .brand-sep {
@@ -228,6 +215,19 @@ async function handleLogin() {
   animation: card-in 0.4s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
+.login-brand-lockup {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 20px;
+}
+
+.login-lockup-img {
+  max-height: 56px;
+  width: auto;
+  max-width: 100%;
+  object-fit: contain;
+}
+
 @keyframes card-in {
   from {
     opacity: 0;
@@ -243,7 +243,7 @@ async function handleLogin() {
 .login-title {
   font-size: 22px;
   font-weight: 700;
-  color: #1b3f8b;
+  color: #004fa3;
   margin-bottom: 6px;
 }
 
@@ -316,7 +316,7 @@ async function handleLogin() {
 
 .input:focus {
   background: #fff;
-  border-color: #1b3f8b;
+  border-color: #004fa3;
   box-shadow: 0 0 0 3px rgba(27, 63, 139, 0.12);
 }
 
@@ -390,8 +390,8 @@ async function handleLogin() {
   width: 100%;
   padding: 10px 14px;
   min-height: 44px;
-  background: #1b3f8b;
-  border: 1.5px solid #1b3f8b;
+  background: #004fa3;
+  border: 1.5px solid #004fa3;
   border-radius: 8px;
   font-family: 'DM Sans', sans-serif;
   font-size: 14px;
@@ -460,8 +460,8 @@ async function handleLogin() {
 }
 
 .role-admin {
-  background: #1b3f8b;
-  border-color: #1b3f8b;
+  background: #004fa3;
+  border-color: #004fa3;
   color: #fff;
 }
 

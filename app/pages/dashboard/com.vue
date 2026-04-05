@@ -2,21 +2,18 @@
 definePageMeta({ middleware: ['auth'] })
 const { deconnexion } = useAuth()
 
-// ── Data ──────────────────────────────────────────────────────────────────────
 const { data: signalements, refresh } = await useFetch('/api/signalements-com')
 const { data: meteo } = await useFetch('/api/meteo')
 
-// Realtime
 useSignalementsRealtimeRefresh(refresh)
 
 const heure = ref('')
 const date = ref('')
 
-// ── Vue active (carte par défaut : centre d’ops) ───────────────────────────────
-const vueActive = ref('carte') // 'carte' | 'live' | 'analyses'
+const vueActive = ref('carte')
+const mapComContainer = ref(null)
 
-// ── Filtres ───────────────────────────────────────────────────────────────────
-const filtreSource = ref('tous')   // 'tous' | 'twitter' | 'tiktok'
+const filtreSource = ref('tous')
 
 const signalementsFiltres = computed(() => {
   let list = signalements.value || []
@@ -28,7 +25,6 @@ function isVersRh(g) {
   return g === 'moyen' || g === 'élevé'
 }
 
-// ── Computed stats ────────────────────────────────────────────────────────────
 const versRh = computed(() => signalements.value?.filter(s => isVersRh(s.gravite)).length || 0)
 const versManagerSeul = computed(() =>
   signalements.value?.filter(s => s.gravite === 'positif' || s.gravite === 'faible').length || 0)
@@ -49,7 +45,6 @@ const countByGraviteFiltre = computed(() => {
 
 const totalFiltre = computed(() => signalementsFiltres.value?.length || 0)
 
-// Zone hotspots (regroupement par ligne)
 const hotspotsByLigne = computed(() => {
   const m = {}
   signalements.value?.forEach(s => {
@@ -62,7 +57,6 @@ const hotspotsByLigne = computed(() => {
   return Object.values(m).sort((a, b) => b.total - a.total).slice(0, 8)
 })
 
-// Nouveaux (dernières 2h) — pour pulsation carte & tags live
 const nowMinus2h = computed(() => new Date(Date.now() - 2 * 60 * 60 * 1000))
 function signalementTimestamp(s) {
   const raw = s.created_at || s.heure_incident
@@ -74,7 +68,6 @@ const recentOnMapCount = computed(() =>
   (signalementsFiltres.value || []).filter(s => s.lat && s.lng && isRecent(s)).length
 )
 
-/** Récent dans le flux (filtres), toutes sources — pour panneaux carte */
 const recentFluxCount = computed(() =>
   (signalementsFiltres.value || []).filter(s => isRecent(s)).length
 )
@@ -107,7 +100,7 @@ const graviteDonutStyle = computed(() => {
     ['élevé', '#e24b4a'],
     ['moyen', '#f59e0b'],
     ['faible', '#3b82f6'],
-    ['positif', '#00a88f'],
+    ['positif', '#4bc0ad'],
   ]
   const stops = segs.map(([k, color]) => {
     const pct = (c[k] / t) * 100
@@ -138,10 +131,8 @@ const versRhFiltre = computed(() =>
 const versManagerSeulFiltre = computed(() =>
   signalementsFiltres.value?.filter(s => s.gravite === 'positif' || s.gravite === 'faible').length || 0)
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
-const graviteColor = g => ({ 'élevé': '#e24b4a', 'moyen': '#f59e0b', 'faible': '#3b82f6', 'positif': '#00a88f' }[g] || '#888')
-const sourceIcon = s => s === 'tiktok' ? '🎵' : '𝕏'
-const sourceColor = s => s === 'tiktok' ? '#010101' : '#1d9bf0'
+const graviteColor = g => ({ 'élevé': '#e24b4a', 'moyen': '#f59e0b', 'faible': '#3b82f6', 'positif': '#4bc0ad' }[g] || '#888')
+const sourceColor = s => (s === 'tiktok' ? '#4bc0ad' : '#004fa3')
 
 function formatRelative(iso) {
   if (!iso) return '—'
@@ -156,13 +147,11 @@ function formatRelative(iso) {
 
 function formatLigne(s) { return s.ligne_id?.replace('L', '') || '—' }
 
-// ── Modal fiche ───────────────────────────────────────────────────────────────
 const ficheActive = ref(null)
 const ficheOuverte = ref(false)
 function ouvrirFiche(s) { ficheActive.value = s; ficheOuverte.value = true }
 function fermerFiche() { ficheOuverte.value = false; setTimeout(() => ficheActive.value = null, 300) }
 
-// ── Carte : panneau zone (plusieurs signalements au même regroupement)
 const zoneActive = ref(null)
 function fermerZoneCarte() { zoneActive.value = null }
 function ouvrirFicheDepuisZone(s) {
@@ -170,8 +159,12 @@ function ouvrirFicheDepuisZone(s) {
   ouvrirFiche(s)
 }
 
-// ── Horloge ───────────────────────────────────────────────────────────────────
-onMounted(() => {
+function onWindowResizeMap() {
+  if (vueActive.value === 'carte' && mapInstance)
+    queueMapResize()
+}
+
+onMounted(async () => {
   const tick = () => {
     const now = new Date()
     heure.value = now.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
@@ -179,15 +172,24 @@ onMounted(() => {
   }
   tick()
   setInterval(tick, 1000)
+
+  window.addEventListener('resize', onWindowResizeMap, { passive: true })
+
+  await nextTick()
+  if (vueActive.value === 'carte') {
+    requestAnimationFrame(async () => {
+      await nextTick()
+      await initMap()
+      queueMapResize()
+    })
+  }
 })
 
 onUnmounted(() => {
+  window.removeEventListener('resize', onWindowResizeMap)
   destroyMap()
 })
 
-// ── Carte Leaflet ─────────────────────────────────────────────────────────────
-// v-if sur la vue carte démonte #map-com : l’instance Leaflet doit être détruite à la sortie
-// et recréée au retour (invalidateSize ne suffit pas : le conteneur DOM n’existe plus).
 let mapInstance = null
 let layerGroup = null
 let L_ref = null
@@ -197,9 +199,7 @@ function destroyMap() {
     try {
       mapInstance.off()
       mapInstance.remove()
-    } catch {
-      /* ignore */
-    }
+    } catch {}
     mapInstance = null
     layerGroup = null
   }
@@ -207,18 +207,28 @@ function destroyMap() {
 
 watch(signalementsFiltres, () => { if (layerGroup) rafraichirMarqueurs() })
 
+function queueMapResize() {
+  requestAnimationFrame(() => {
+    mapInstance?.invalidateSize()
+  })
+  setTimeout(() => mapInstance?.invalidateSize(), 80)
+  setTimeout(() => mapInstance?.invalidateSize(), 350)
+}
+
 watch(vueActive, async (val, oldVal) => {
   if (oldVal === 'carte' && val !== 'carte') {
     destroyMap()
   }
   if (val === 'carte') {
     await nextTick()
+    await nextTick()
     await initMap()
+    queueMapResize()
   }
-}, { flush: 'post', immediate: true })
+}, { flush: 'post' })
 
 async function initMap() {
-  const el = typeof document !== 'undefined' ? document.getElementById('map-com') : null
+  const el = mapComContainer.value
   if (!el) return
 
   destroyMap()
@@ -234,10 +244,7 @@ async function initMap() {
   layerGroup = L_ref.layerGroup().addTo(mapInstance)
   mapInstance.on('click', () => { zoneActive.value = null })
   rafraichirMarqueurs()
-
-  requestAnimationFrame(() => {
-    mapInstance?.invalidateSize()
-  })
+  queueMapResize()
 }
 
 const MAP_MARKER_RADIUS_MAX_COM = 42
@@ -315,21 +322,14 @@ function rafraichirMarqueurs() {
 <template>
   <div class="com-root">
 
-    <!-- ═══ HEADER ═════════════════════════════════════════════════════════ -->
     <header class="header">
       <div class="h-brand">
-        <div class="logo">
-          <svg width="18" height="18" viewBox="0 0 28 28" fill="none">
-            <circle cx="14" cy="14" r="13" stroke="white" stroke-width="2" />
-            <path d="M8 14 Q14 6 20 14 Q14 22 8 14Z" fill="white" opacity="0.9" />
-          </svg>
-        </div>
-        <span class="brand-s">Signal</span><span class="brand-r">RATP</span>
+        <img src="/branding/ratp-mark.png" alt="RATP" class="brand-mark-header" width="120" height="34" />
+        <span class="brand-vigie">Vigie</span><span class="brand-r">RATP</span>
         <div class="sep" />
-        <span class="role-pill">📡 Communication</span>
+        <span class="role-pill">Communication</span>
       </div>
 
-      <!-- Stats rapides header -->
       <div class="h-stats">
         <div class="hs" :class="{ urgent: versRh > 0 }">
           <span class="hs-n">{{ versRh }}</span>
@@ -340,36 +340,31 @@ function rafraichirMarqueurs() {
           <span class="hs-l">Manager seul</span>
         </div>
         <div class="hs">
-          <span class="hs-n" style="color:#1d9bf0">{{ fromTwitter }}</span>
+          <span class="hs-n">{{ fromTwitter }}</span>
           <span class="hs-l">Twitter</span>
         </div>
         <div class="hs">
-          <span class="hs-n" style="color:#ff0050">{{ fromTiktok }}</span>
+          <span class="hs-n">{{ fromTiktok }}</span>
           <span class="hs-l">TikTok</span>
         </div>
       </div>
 
       <div class="h-right">
-        <div v-if="meteo" class="meteo-mini">
-          <span>{{ meteo.temp }}°C · {{ meteo.description }}</span>
-        </div>
         <div class="clock-mini">{{ heure }}</div>
         <button class="btn-deconnexion" @click="deconnexion">Déconnexion</button>
       </div>
     </header>
 
-    <!-- ═══ NAV TABS ════════════════════════════════════════════════════════ -->
     <nav class="nav-tabs">
       <button v-for="tab in [
-        { key: 'carte', icon: '🗺️', label: 'Carte' },
-        { key: 'live', icon: '📡', label: 'Flux live' },
-        { key: 'analyses', icon: '📊', label: 'Analyses' },
+        { key: 'carte', label: 'Carte' },
+        { key: 'live', label: 'Flux live' },
+        { key: 'analyses', label: 'Analyses' },
       ]" :key="tab.key" class="nav-tab" :class="{ active: vueActive === tab.key }" @click="vueActive = tab.key">
-        {{ tab.icon }} {{ tab.label }}
+        {{ tab.label }}
         <span v-if="tab.key === 'live' && versRh > 0" class="tab-badge">{{ versRh }}</span>
       </button>
 
-      <!-- Filtres -->
       <div class="nav-filters">
         <select v-model="filtreSource" class="f-sel">
           <option value="tous">Toutes sources</option>
@@ -379,10 +374,8 @@ function rafraichirMarqueurs() {
       </div>
     </nav>
 
-    <!-- ═══ VUE LIVE ════════════════════════════════════════════════════════ -->
     <div v-if="vueActive === 'live'" class="view-live">
 
-      <!-- Colonne flux -->
       <div class="flux-col">
         <div class="col-title">
           Flux entrant
@@ -397,13 +390,13 @@ function rafraichirMarqueurs() {
           <div v-for="s in signalementsFiltres" :key="s.id" class="flux-card"
             :class="{ 'is-recent': isRecent(s) }" @click="ouvrirFiche(s)">
 
-            <!-- Barre gravité -->
             <div class="gbar" :style="`background:${graviteColor(s.gravite)}`" />
 
-            <!-- En-tête -->
             <div class="fc-head">
               <div class="fc-source" :style="`background:${sourceColor(s.source)}22;color:${sourceColor(s.source)}`">
-                {{ sourceIcon(s.source) }} {{ s.source }}
+                <img v-if="s.source === 'tiktok'" src="/branding/icon-tiktok.svg" alt="" class="fc-src-ico" />
+                <img v-else src="/branding/icon-x.svg" alt="" class="fc-src-ico" />
+                {{ s.source }}
               </div>
               <span class="fc-grav"
                 :style="`background:${graviteColor(s.gravite)}18;color:${graviteColor(s.gravite)};border-color:${graviteColor(s.gravite)}40`">
@@ -414,12 +407,10 @@ function rafraichirMarqueurs() {
               <span class="fc-time">{{ formatRelative(s.created_at) }}</span>
             </div>
 
-            <!-- Contenu -->
             <div class="fc-type">{{ s.type_incident }}</div>
             <p class="fc-desc">{{ s.resume_ia || s.description?.substring(0, 100) }}{{ (!s.resume_ia &&
               s.description?.length > 100) ? '…' : '' }}</p>
 
-            <!-- Meta -->
             <div class="fc-meta">
               <span v-if="s.ligne_id">Ligne {{ formatLigne(s) }}</span>
               <span v-if="s.meteo">{{ s.meteo }}</span>
@@ -430,10 +421,8 @@ function rafraichirMarqueurs() {
         </TransitionGroup>
       </div>
 
-      <!-- Colonne stats latérale -->
       <div class="stats-col">
 
-        <!-- Gravité donut simplifié -->
         <div class="stat-card">
           <div class="sc-title">Répartition gravité</div>
           <div class="gravite-bars">
@@ -441,7 +430,7 @@ function rafraichirMarqueurs() {
               { label: 'Élevé', key: 'élevé', color: '#e24b4a' },
               { label: 'Moyen', key: 'moyen', color: '#f59e0b' },
               { label: 'Faible', key: 'faible', color: '#3b82f6' },
-              { label: 'Positif', key: 'positif', color: '#00a88f' },
+              { label: 'Positif', key: 'positif', color: '#4bc0ad' },
             ]" :key="bar.key" class="gbar-row">
               <span class="gbar-label">{{ bar.label }}</span>
               <div class="gbar-track">
@@ -453,7 +442,6 @@ function rafraichirMarqueurs() {
           </div>
         </div>
 
-        <!-- Hotspots par ligne -->
         <div class="stat-card">
           <div class="sc-title">Lignes les plus signalées</div>
           <div v-if="!hotspotsFiltres.length" class="sc-empty">Aucune donnée</div>
@@ -471,22 +459,21 @@ function rafraichirMarqueurs() {
           </div>
         </div>
 
-        <!-- Sources breakdown -->
         <div class="stat-card">
           <div class="sc-title">Sources</div>
           <div class="source-donut">
             <div class="sd-row">
-              <div class="sd-icon" style="color:#1d9bf0">𝕏</div>
+              <img src="/branding/icon-x.svg" alt="" class="sd-icon-img" width="18" height="18" />
               <div class="sd-bar-wrap">
-                <div class="sd-bar" style="background:#1d9bf0"
+                <div class="sd-bar" style="background:#004fa3"
                   :style="`width:${totalFiltre ? (fromTwitterFiltre / totalFiltre) * 100 : 0}%`" />
               </div>
               <span class="sd-val">{{ fromTwitterFiltre }}</span>
             </div>
             <div class="sd-row">
-              <div class="sd-icon" style="color:#ff0050">🎵</div>
+              <img src="/branding/icon-tiktok.svg" alt="" class="sd-icon-img" width="18" height="18" />
               <div class="sd-bar-wrap">
-                <div class="sd-bar" style="background:#ff0050"
+                <div class="sd-bar" style="background:#4bc0ad"
                   :style="`width:${totalFiltre ? (fromTiktokFiltre / totalFiltre) * 100 : 0}%`" />
               </div>
               <span class="sd-val">{{ fromTiktokFiltre }}</span>
@@ -494,13 +481,12 @@ function rafraichirMarqueurs() {
           </div>
         </div>
 
-        <!-- Routage dashboards -->
         <div class="stat-card">
-          <div class="sc-title">Routage automatique</div>
+          <div class="sc-title">Routage</div>
           <div class="validation-stats">
             <div class="vs-item">
-              <div class="vs-circle" style="border-color:#1b3f8b">
-                <span style="color:#1b3f8b">{{ versManagerSeulFiltre }}</span>
+              <div class="vs-circle" style="border-color:#004fa3">
+                <span style="color:#004fa3">{{ versManagerSeulFiltre }}</span>
               </div>
               <span>Manager seul</span>
             </div>
@@ -517,7 +503,6 @@ function rafraichirMarqueurs() {
       </div>
     </div>
 
-    <!-- ═══ VUE ANALYSES ════════════════════════════════════════════════════ -->
     <div v-if="vueActive === 'analyses'" class="view-analyses">
       <div class="analyses-grid">
         <div class="analyses-hero anim-fade-up">
@@ -550,7 +535,7 @@ function rafraichirMarqueurs() {
                   { label: 'Élevé', key: 'élevé', color: '#e24b4a' },
                   { label: 'Moyen', key: 'moyen', color: '#f59e0b' },
                   { label: 'Faible', key: 'faible', color: '#3b82f6' },
-                  { label: 'Positif', key: 'positif', color: '#00a88f' },
+                  { label: 'Positif', key: 'positif', color: '#4bc0ad' },
                 ]" :key="bar.key">
                   <span class="dl-dot" :style="`background:${bar.color}`" />
                   <span class="dl-t">{{ bar.label }}</span>
@@ -564,14 +549,14 @@ function rafraichirMarqueurs() {
             <div class="an-vis-title">Sources</div>
             <div class="an-vis-sources">
               <div class="sd-row">
-                <div class="sd-icon" style="color:#1d9bf0">𝕏</div>
+                <img src="/branding/icon-x.svg" alt="" class="sd-icon-img" width="18" height="18" />
                 <div class="sd-bar-wrap">
                   <div class="sd-bar sd-bar-tw" :style="`width:${totalFiltre ? (fromTwitterFiltre / totalFiltre) * 100 : 0}%`" />
                 </div>
                 <span class="sd-val">{{ fromTwitterFiltre }}</span>
               </div>
               <div class="sd-row">
-                <div class="sd-icon" style="color:#ff0050">🎵</div>
+                <img src="/branding/icon-tiktok.svg" alt="" class="sd-icon-img" width="18" height="18" />
                 <div class="sd-bar-wrap">
                   <div class="sd-bar sd-bar-tt" :style="`width:${totalFiltre ? (fromTiktokFiltre / totalFiltre) * 100 : 0}%`" />
                 </div>
@@ -589,7 +574,7 @@ function rafraichirMarqueurs() {
                 <span class="al-name">{{ h.ligne.replace('L', '') !== 'Inconnue' ? `L${h.ligne.replace('L', '')}` : '?' }}</span>
                 <div class="al-bar-track">
                   <div class="al-bar-fill"
-                    :style="`width:${hotspotsFiltres[0] ? (h.total / hotspotsFiltres[0].total) * 100 : 0}%;background:linear-gradient(90deg,#1b3f8b,#00a88f)`" />
+                    :style="`width:${hotspotsFiltres[0] ? (h.total / hotspotsFiltres[0].total) * 100 : 0}%;background:linear-gradient(90deg,#004fa3,#4bc0ad)`" />
                 </div>
                 <span class="al-n">{{ h.total }}</span>
               </div>
@@ -619,7 +604,9 @@ function rafraichirMarqueurs() {
               <tr v-for="s in signalementsFiltres" :key="s.id" @click="ouvrirFiche(s)" class="at-row">
                 <td>
                   <span class="src-badge" :style="`color:${sourceColor(s.source)}`">
-                    {{ sourceIcon(s.source) }} {{ s.source }}
+                    <img v-if="s.source === 'tiktok'" src="/branding/icon-tiktok.svg" alt="" class="at-src-ico" />
+                    <img v-else src="/branding/icon-x.svg" alt="" class="at-src-ico" />
+                    {{ s.source }}
                   </span>
                 </td>
                 <td>
@@ -649,10 +636,15 @@ function rafraichirMarqueurs() {
       </div>
     </div>
 
-    <!-- ═══ VUE CARTE ═══════════════════════════════════════════════════════ -->
     <div v-if="vueActive === 'carte'" class="view-carte view-carte-ops">
       <aside class="carte-rail carte-rail-left">
-        <div class="carte-panel carte-panel-highlight anim-carte-in" style="animation-delay: 0ms">
+        <div v-if="meteo" class="carte-panel carte-panel-meteo anim-carte-in" style="animation-delay: 0ms">
+          <MeteoAnimatedCard :meteo="meteo" variant="panel" size="rail" />
+        </div>
+        <div
+          class="carte-panel carte-panel-highlight anim-carte-in"
+          :style="{ animationDelay: meteo ? '50ms' : '0ms' }"
+        >
           <div class="cp-label">
             <span class="cp-live-dot" />
             Flux filtré
@@ -660,25 +652,25 @@ function rafraichirMarqueurs() {
           <div class="cp-value">{{ signalementsFiltres.length }}</div>
           <div class="cp-sub">signalements dans la sélection</div>
         </div>
-        <div class="carte-panel anim-carte-in" style="animation-delay: 45ms">
+        <div class="carte-panel anim-carte-in" :style="{ animationDelay: meteo ? '100ms' : '45ms' }">
           <div class="cp-label">Nouveaux (&lt; 2 h)</div>
           <div class="cp-value cp-accent">{{ recentFluxCount }}</div>
           <div class="cp-sub">dont {{ recentOnMapCount }} sur la carte</div>
         </div>
-        <div class="carte-panel anim-carte-in" style="animation-delay: 90ms">
+        <div class="carte-panel anim-carte-in" :style="{ animationDelay: meteo ? '150ms' : '90ms' }">
           <div class="cp-label">Géolocalisés</div>
           <div class="cp-value">{{ withCoordsCount }}</div>
           <div class="cp-sub">points affichés (agrégés par zone)</div>
         </div>
-        <div class="carte-panel anim-carte-in" style="animation-delay: 135ms">
+        <div class="carte-panel anim-carte-in" :style="{ animationDelay: meteo ? '200ms' : '135ms' }">
           <div class="cp-label">Sources (filtre)</div>
           <div class="carte-src-grid">
             <div class="csg">
-              <span class="csg-ic" style="color:#1d9bf0">𝕏</span>
+              <img src="/branding/icon-x.svg" alt="" class="csg-ico-img" width="20" height="20" />
               <span class="csg-n">{{ fromTwitterFiltre }}</span>
             </div>
             <div class="csg">
-              <span class="csg-ic" style="color:#ff0050">🎵</span>
+              <img src="/branding/icon-tiktok.svg" alt="" class="csg-ico-img" width="20" height="20" />
               <span class="csg-n">{{ fromTiktokFiltre }}</span>
             </div>
           </div>
@@ -698,7 +690,7 @@ function rafraichirMarqueurs() {
           <div class="carte-frame-scan" aria-hidden="true" />
           <div class="carte-map-inner">
             <div class="map-wrap-com">
-              <div id="map-com" />
+              <div id="map-com" ref="mapComContainer" />
               <Transition name="fade">
                 <div v-if="zoneActive" class="zone-panel-com" @click.stop>
                   <div class="zpc-head">
@@ -711,7 +703,11 @@ function rafraichirMarqueurs() {
                       @click="ouvrirFicheDepuisZone(s)">
                       <span class="zpc-grav" :style="`background:${graviteColor(s.gravite)}`" />
                       <div class="zpc-body">
-                        <span class="zpc-src">{{ sourceIcon(s.source) }} {{ s.source }}</span>
+                        <span class="zpc-src">
+                          <img v-if="s.source === 'tiktok'" src="/branding/icon-tiktok.svg" alt="" class="zpc-src-ico" />
+                          <img v-else src="/branding/icon-x.svg" alt="" class="zpc-src-ico" />
+                          {{ s.source }}
+                        </span>
                         <span class="zpc-type">{{ s.type_incident }}</span>
                         <span class="zpc-meta">Ligne {{ formatLigne(s) }} · {{ formatRelative(s.created_at ||
                           s.heure_incident) }}</span>
@@ -728,7 +724,7 @@ function rafraichirMarqueurs() {
               { label: 'Élevé', color: '#e24b4a' },
               { label: 'Moyen', color: '#f59e0b' },
               { label: 'Faible', color: '#3b82f6' },
-              { label: 'Positif', color: '#00a88f' },
+              { label: 'Positif', color: '#4bc0ad' },
             ]" :key="item.label" class="ml-item">
               <span class="ml-dot" :style="`background:${item.color}`" />
               {{ item.label }}
@@ -749,7 +745,7 @@ function rafraichirMarqueurs() {
             { label: 'Élevé', key: 'élevé', color: '#e24b4a' },
             { label: 'Moyen', key: 'moyen', color: '#f59e0b' },
             { label: 'Faible', key: 'faible', color: '#3b82f6' },
-            { label: 'Positif', key: 'positif', color: '#00a88f' },
+            { label: 'Positif', key: 'positif', color: '#4bc0ad' },
           ]" :key="bar.key" class="crg-row">
             <span class="crg-l">{{ bar.label }}</span>
             <div class="crg-track">
@@ -763,7 +759,7 @@ function rafraichirMarqueurs() {
           <div class="cp-label">Routage</div>
           <div class="carte-val-row">
             <div class="cvr">
-              <span class="cvr-n" style="color:#1b3f8b">{{ versManagerSeulFiltre }}</span>
+              <span class="cvr-n" style="color:#004fa3">{{ versManagerSeulFiltre }}</span>
               <span class="cvr-l">Manager</span>
             </div>
             <div class="cvr-arrow">+</div>
@@ -787,7 +783,6 @@ function rafraichirMarqueurs() {
       </aside>
     </div>
 
-    <!-- ═══ MODAL FICHE ═════════════════════════════════════════════════════ -->
     <Transition name="fade">
       <div v-if="ficheOuverte" class="modal-overlay" @click.self="fermerFiche" />
     </Transition>
@@ -796,7 +791,9 @@ function rafraichirMarqueurs() {
         <div class="modal-header" :style="`--accent:${graviteColor(ficheActive.gravite)}`">
           <div class="mh-left">
             <span class="src-badge-lg" :style="`color:${sourceColor(ficheActive.source)}`">
-              {{ sourceIcon(ficheActive.source) }} {{ ficheActive.source }}
+              <img v-if="ficheActive.source === 'tiktok'" src="/branding/icon-tiktok.svg" alt="" class="modal-src-ico" />
+              <img v-else src="/branding/icon-x.svg" alt="" class="modal-src-ico" />
+              {{ ficheActive.source }}
             </span>
             <span class="grav-badge"
               :style="`background:${graviteColor(ficheActive.gravite)}20;color:${graviteColor(ficheActive.gravite)}`">
@@ -811,22 +808,18 @@ function rafraichirMarqueurs() {
         </div>
 
         <div class="modal-body">
-          <!-- Résumé IA -->
           <div v-if="ficheActive.resume_ia" class="ia-summary">
             <span class="ia-icon">🤖</span>
             <p>{{ ficheActive.resume_ia }}</p>
           </div>
 
-          <!-- Description complète -->
           <p class="section-label">CONTENU DU POST</p>
           <p class="description-text">{{ ficheActive.description }}</p>
 
-          <!-- Lien source -->
           <a v-if="ficheActive.lien_social" :href="ficheActive.lien_social" target="_blank" class="source-link">
             Voir le post original →
           </a>
 
-          <!-- Infos grid -->
           <div class="info-grid">
             <div class="info-card"><span class="info-label">LIGNE</span><span class="info-value">{{ ficheActive.ligne_id
               ? `Ligne ${formatLigne(ficheActive)}` : '—' }}</span></div>
@@ -838,7 +831,6 @@ function rafraichirMarqueurs() {
                 }}</span></div>
           </div>
 
-          <!-- Fiche manager IA -->
           <template v-if="ficheActive.fiche_manager">
             <p class="section-label" style="margin-top:16px">ANALYSE IA — FICHE MANAGER</p>
             <div class="fiche-manager-block">
@@ -853,7 +845,6 @@ function rafraichirMarqueurs() {
             </div>
           </template>
 
-          <!-- Score IA -->
           <template v-if="ficheActive.scoring_ia">
             <p class="section-label" style="margin-top:16px">SCORING IA</p>
             <div class="scoring-block">
@@ -870,12 +861,12 @@ function rafraichirMarqueurs() {
           <div class="routing-info-banner">
             <span>→</span>
             <div>
-              <strong>Transmission automatique</strong>
+              <strong>Routage</strong>
               <p v-if="isVersRh(ficheActive.gravite)">
-                Gravité moyenne ou élevée : visible dans les dashboards Manager et RH/Juridique (e-mail selon votre flux n8n).
+                Gravité moyenne ou élevée : dashboards Manager et RH/Juridique.
               </p>
               <p v-else>
-                Gravité faible ou positive : visible dans le dashboard Manager uniquement.
+                Gravité faible ou positive : dashboard Manager.
               </p>
             </div>
           </div>
@@ -901,24 +892,28 @@ function rafraichirMarqueurs() {
   padding: 0;
 }
 
-/* ─── ROOT (aligné dashboard Manager : fond clair, cartes blanches) ─── */
 .com-root {
   min-height: 100vh;
+  min-height: 100dvh;
+  height: 100dvh;
+  max-height: 100dvh;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
   background: #f0f4f8;
   color: #1a1a2e;
   font-family: 'DM Sans', sans-serif;
 }
 
-/* ─── HEADER (barre bleue RATP comme Manager) ─── */
 .header {
   display: flex;
   align-items: center;
-  gap: 20px;
-  padding: 0 24px;
+  gap: 16px;
+  padding: 0 16px;
   min-height: 56px;
-  background: #1b3f8b;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  background: #004fa3;
   border-bottom: none;
   position: sticky;
   top: 0;
@@ -932,26 +927,32 @@ function rafraichirMarqueurs() {
   flex-shrink: 0;
 }
 
-.logo {
-  width: 32px;
-  height: 32px;
-  border-radius: 8px;
-  background: linear-gradient(135deg, #1b3f8b, #00a88f);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.brand-s {
+.brand-vigie {
   font-size: 16px;
   font-weight: 700;
   color: #fff;
 }
 
+.fc-src-ico,
+.at-src-ico,
+.zpc-src-ico,
+.modal-src-ico {
+  width: 14px;
+  height: 14px;
+  vertical-align: middle;
+  margin-right: 4px;
+  object-fit: contain;
+}
+
+.modal-src-ico {
+  width: 18px;
+  height: 18px;
+}
+
 .brand-r {
   font-size: 16px;
   font-weight: 700;
-  color: #00a88f;
+  color: #4bc0ad;
 }
 
 .sep {
@@ -973,9 +974,11 @@ function rafraichirMarqueurs() {
 
 .h-stats {
   display: flex;
-  gap: 16px;
+  gap: 12px;
   flex: 1;
   justify-content: center;
+  flex-wrap: wrap;
+  min-width: 0;
 }
 
 .hs {
@@ -1009,11 +1012,6 @@ function rafraichirMarqueurs() {
   flex-shrink: 0;
 }
 
-.meteo-mini {
-  font-size: 11px;
-  color: rgba(255, 255, 255, 0.85);
-}
-
 .clock-mini {
   font-size: 13px;
   font-weight: 600;
@@ -1036,12 +1034,13 @@ function rafraichirMarqueurs() {
   background: rgba(255, 255, 255, 0.18);
 }
 
-/* ─── NAV TABS ─── */
 .nav-tabs {
   display: flex;
   align-items: center;
   gap: 4px;
-  padding: 8px 24px;
+  padding: 8px 16px;
+  flex-shrink: 0;
+  flex-wrap: wrap;
   background: #fff;
   border-bottom: 1px solid #e2e8f0;
   box-shadow: 0 1px 0 rgba(27, 63, 139, 0.04);
@@ -1066,14 +1065,14 @@ function rafraichirMarqueurs() {
 
 .nav-tab:hover {
   background: #eff6ff;
-  color: #1b3f8b;
+  color: #004fa3;
   border-color: #dbeafe;
 }
 
 .nav-tab.active {
-  background: #1b3f8b;
+  background: #004fa3;
   color: #fff;
-  border-color: #1b3f8b;
+  border-color: #004fa3;
   box-shadow: 0 4px 14px rgba(27, 63, 139, 0.25);
 }
 
@@ -1095,13 +1094,25 @@ function rafraichirMarqueurs() {
 
 .nav-tab.active .tab-badge {
   background: #fff;
-  color: #1b3f8b;
+  color: #004fa3;
 }
 
 .nav-filters {
   margin-left: auto;
   display: flex;
   gap: 8px;
+  flex-shrink: 0;
+}
+
+@media (max-width: 640px) {
+  .nav-filters {
+    margin-left: 0;
+    width: 100%;
+  }
+
+  .nav-filters .f-sel {
+    width: 100%;
+  }
 }
 
 .f-sel {
@@ -1115,7 +1126,6 @@ function rafraichirMarqueurs() {
   outline: none;
 }
 
-/* ─── VUE LIVE ─── */
 .view-live {
   display: flex;
   gap: 0;
@@ -1154,14 +1164,14 @@ function rafraichirMarqueurs() {
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: #00a88f;
+  background: #4bc0ad;
   animation: blink 1.2s ease-in-out infinite;
 }
 
 .live-label {
   font-size: 10px;
   font-weight: 700;
-  color: #00a88f;
+  color: #4bc0ad;
   letter-spacing: 0.1em;
 }
 
@@ -1184,7 +1194,6 @@ function rafraichirMarqueurs() {
   font-size: 14px;
 }
 
-/* FLUX CARD */
 .flux-card {
   background: #fff;
   border: 1px solid #e2e8f0;
@@ -1261,7 +1270,7 @@ function rafraichirMarqueurs() {
   padding: 2px 6px;
   border-radius: 4px;
   background: rgba(0, 168, 143, 0.2);
-  color: #00a88f;
+  color: #4bc0ad;
   letter-spacing: 0.08em;
 }
 
@@ -1301,7 +1310,7 @@ function rafraichirMarqueurs() {
 }
 
 .fc-link {
-  color: #00a88f;
+  color: #4bc0ad;
   text-decoration: none;
   font-weight: 500;
 }
@@ -1310,7 +1319,6 @@ function rafraichirMarqueurs() {
   text-decoration: underline;
 }
 
-/* FLUX ANIMATION */
 .flux-enter-active {
   transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
 }
@@ -1320,7 +1328,6 @@ function rafraichirMarqueurs() {
   transform: translateY(-12px);
 }
 
-/* ─── STATS COL ─── */
 .stats-col {
   width: 300px;
   flex-shrink: 0;
@@ -1361,7 +1368,6 @@ function rafraichirMarqueurs() {
   padding: 16px 0;
 }
 
-/* Gravité bars */
 .gravite-bars {
   display: flex;
   flex-direction: column;
@@ -1403,7 +1409,6 @@ function rafraichirMarqueurs() {
   text-align: right;
 }
 
-/* Hotspots */
 .hotspot-list {
   display: flex;
   flex-direction: column;
@@ -1451,10 +1456,9 @@ function rafraichirMarqueurs() {
 .hs-total {
   font-size: 12px;
   font-weight: 700;
-  color: #1b3f8b;
+  color: #004fa3;
 }
 
-/* Source donut */
 .sd-row {
   display: flex;
   align-items: center;
@@ -1462,10 +1466,11 @@ function rafraichirMarqueurs() {
   margin-bottom: 10px;
 }
 
-.sd-icon {
-  font-size: 16px;
-  width: 24px;
-  text-align: center;
+.sd-icon-img {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  object-fit: contain;
 }
 
 .sd-bar-wrap {
@@ -1491,7 +1496,6 @@ function rafraichirMarqueurs() {
   text-align: right;
 }
 
-/* Validation stats */
 .validation-stats {
   display: flex;
   align-items: center;
@@ -1531,7 +1535,6 @@ function rafraichirMarqueurs() {
   color: #cbd5e1;
 }
 
-/* ─── VUE ANALYSES ─── */
 .view-analyses {
   flex: 1;
   min-height: 0;
@@ -1559,7 +1562,7 @@ function rafraichirMarqueurs() {
   margin: 0;
   font-size: 22px;
   font-weight: 700;
-  color: #1b3f8b;
+  color: #004fa3;
   letter-spacing: -0.02em;
 }
 
@@ -1624,7 +1627,7 @@ function rafraichirMarqueurs() {
 .an-kpi-value {
   font-size: 26px;
   font-weight: 700;
-  color: #1b3f8b;
+  color: #004fa3;
   font-variant-numeric: tabular-nums;
   line-height: 1.1;
 }
@@ -1705,7 +1708,7 @@ function rafraichirMarqueurs() {
 .dh-n {
   font-size: 22px;
   font-weight: 800;
-  color: #1b3f8b;
+  color: #004fa3;
   line-height: 1;
 }
 
@@ -1758,11 +1761,11 @@ function rafraichirMarqueurs() {
 }
 
 .sd-bar-tw {
-  background: #1d9bf0;
+  background: #004fa3;
 }
 
 .sd-bar-tt {
-  background: #ff0050;
+  background: #4bc0ad;
 }
 
 .an-line-ranks {
@@ -1808,7 +1811,7 @@ function rafraichirMarqueurs() {
 .al-n {
   font-size: 12px;
   font-weight: 700;
-  color: #1b3f8b;
+  color: #004fa3;
   width: 24px;
   text-align: right;
 }
@@ -1817,7 +1820,10 @@ function rafraichirMarqueurs() {
   background: #fff;
   border: 1px solid #e2e8f0;
   border-radius: 14px;
-  overflow: hidden;
+  overflow: auto;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  max-width: 100%;
   box-shadow: 0 6px 28px rgba(15, 23, 42, 0.06);
 }
 
@@ -1912,7 +1918,7 @@ function rafraichirMarqueurs() {
   padding: 2px 8px;
   border-radius: 999px;
   background: #eff6ff;
-  color: #1b3f8b;
+  color: #004fa3;
 }
 
 .status-chip {
@@ -1924,7 +1930,7 @@ function rafraichirMarqueurs() {
 
 .status-chip.validated {
   background: rgba(0, 168, 143, 0.12);
-  color: #00a88f;
+  color: #4bc0ad;
 }
 
 .status-chip.pending {
@@ -1932,7 +1938,6 @@ function rafraichirMarqueurs() {
   color: #2563eb;
 }
 
-/* ─── VUE CARTE — centre d’ops (données réelles + cadre type Manager) ─── */
 .view-carte-ops {
   flex: 1;
   display: flex;
@@ -1980,6 +1985,11 @@ function rafraichirMarqueurs() {
   background: linear-gradient(145deg, #fff 0%, #f0f7ff 100%);
 }
 
+.carte-panel-meteo {
+  padding: 12px 14px;
+  background: #fff;
+}
+
 .cp-label {
   font-size: 10px;
   font-weight: 700;
@@ -1996,21 +2006,21 @@ function rafraichirMarqueurs() {
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: #00a88f;
+  background: #4bc0ad;
   animation: blink 1.2s ease-in-out infinite;
-  box-shadow: 0 0 8px #00a88f;
+  box-shadow: 0 0 8px #4bc0ad;
 }
 
 .cp-value {
   font-size: 28px;
   font-weight: 800;
-  color: #1b3f8b;
+  color: #004fa3;
   line-height: 1;
   font-variant-numeric: tabular-nums;
 }
 
 .cp-value.cp-accent {
-  color: #00a88f;
+  color: #4bc0ad;
 }
 
 .cp-sub {
@@ -2040,10 +2050,10 @@ function rafraichirMarqueurs() {
   border: 1px solid #e2e8f0;
 }
 
-.csg-ic {
+.csg-ico-img {
   display: block;
-  font-size: 18px;
-  margin-bottom: 4px;
+  margin: 0 auto 4px;
+  object-fit: contain;
 }
 
 .csg-n {
@@ -2072,11 +2082,11 @@ function rafraichirMarqueurs() {
 }
 
 .cmb-tw {
-  background: #1d9bf0;
+  background: #004fa3;
 }
 
 .cmb-tt {
-  background: #ff0050;
+  background: #4bc0ad;
 }
 
 .crg-row {
@@ -2176,19 +2186,21 @@ function rafraichirMarqueurs() {
 
 .ctl-t {
   font-weight: 800;
-  color: #1b3f8b;
+  color: #004fa3;
 }
 
 .carte-center {
   flex: 1;
   min-width: 0;
-  padding: 16px;
+  min-height: 0;
+  padding: 12px;
   display: flex;
   align-items: stretch;
 }
 
 .carte-frame {
   flex: 1;
+  min-height: 0;
   position: relative;
   border-radius: 16px;
   border: 1px solid #e2e8f0;
@@ -2197,7 +2209,6 @@ function rafraichirMarqueurs() {
     0 4px 24px rgba(27, 63, 139, 0.08),
     inset 0 0 0 1px rgba(255, 255, 255, 0.8);
   overflow: hidden;
-  min-height: calc(100vh - 140px);
 }
 
 .anim-map-shell {
@@ -2257,7 +2268,8 @@ function rafraichirMarqueurs() {
   position: relative;
   width: 100%;
   height: 100%;
-  min-height: calc(100vh - 180px);
+  min-height: 0;
+  flex: 1;
 }
 
 #map-com {
@@ -2449,7 +2461,7 @@ function rafraichirMarqueurs() {
   width: 10px;
   height: 10px;
   border-radius: 50%;
-  border: 2px solid #00a88f;
+  border: 2px solid #4bc0ad;
   animation: pulse-legend 1.5s ease-out infinite;
   flex-shrink: 0;
 }
@@ -2469,11 +2481,14 @@ function rafraichirMarqueurs() {
 @media (max-width: 1100px) {
   .view-carte-ops {
     flex-direction: column;
+    overflow: auto;
+    min-height: 0;
   }
 
   .carte-rail,
   .carte-rail-right {
     width: 100%;
+    max-height: none;
     flex-direction: row;
     flex-wrap: wrap;
     border: none;
@@ -2487,16 +2502,86 @@ function rafraichirMarqueurs() {
 
   .carte-center {
     order: 2;
+    flex: 1;
+    min-height: min(52dvh, 480px);
   }
 
   .carte-panel {
     flex: 1;
-    min-width: 140px;
+    min-width: min(140px, 46%);
+  }
+
+  .carte-panel-meteo {
+    flex: 1 1 100%;
+    min-width: 100%;
+  }
+}
+
+@media (max-width: 900px) {
+  .view-live {
+    flex-direction: column;
+  }
+
+  .flux-col {
+    border-right: none;
+    border-bottom: 1px solid #e2e8f0;
+    max-height: 55dvh;
+  }
+
+  .stats-col {
+    width: 100%;
+    border-left: none;
+    border-top: 1px solid #e2e8f0;
+    flex-direction: row;
+    flex-wrap: wrap;
+    padding: 12px;
+  }
+
+  .stats-col .stat-card {
+    flex: 1 1 240px;
+    min-width: min(100%, 240px);
+  }
+
+  .header {
+    padding: 8px 12px;
+    gap: 10px;
+  }
+
+  .h-brand {
+    order: 1;
+  }
+
+  .h-right {
+    order: 2;
+    margin-left: auto;
+  }
+
+  .h-stats {
+    order: 5;
+    flex-basis: 100%;
+    width: 100%;
+    justify-content: space-around;
+    padding-top: 8px;
+    border-top: 1px solid rgba(255, 255, 255, 0.12);
+  }
+
+  .brand-mark-header {
+    max-width: 100px;
+    height: auto;
+  }
+}
+
+@media (max-width: 480px) {
+  .hs-n {
+    font-size: 15px;
+  }
+
+  .hs-l {
+    font-size: 9px;
   }
 }
 
 
-/* ─── MODAL ─── */
 .modal-overlay {
   position: fixed;
   inset: 0;
@@ -2628,7 +2713,7 @@ function rafraichirMarqueurs() {
 
 .source-link {
   font-size: 12px;
-  color: #00a88f;
+  color: #4bc0ad;
   text-decoration: none;
 }
 
@@ -2708,7 +2793,7 @@ function rafraichirMarqueurs() {
 .score-val {
   font-size: 14px;
   font-weight: 700;
-  color: #1b3f8b;
+  color: #004fa3;
 }
 
 .confiance-val {
@@ -2729,12 +2814,12 @@ function rafraichirMarqueurs() {
 
 .routing-info-banner span:first-child {
   font-size: 18px;
-  color: #1b3f8b;
+  color: #004fa3;
 }
 
 .routing-info-banner strong {
   font-size: 13px;
-  color: #1b3f8b;
+  color: #004fa3;
   display: block;
   margin-bottom: 3px;
 }
@@ -2765,7 +2850,6 @@ function rafraichirMarqueurs() {
   cursor: pointer;
 }
 
-/* ─── TRANSITIONS ─── */
 .fade-enter-active,
 .fade-leave-active {
   transition: opacity 0.2s;

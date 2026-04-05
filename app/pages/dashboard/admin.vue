@@ -6,12 +6,8 @@ import QRCode from 'qrcode'
 const { deconnexion, profile } = useAuth()
 const { data: lignes } = await useFetch('/api/lignes')
 
-// ── Navigation sidebar ────────────────────────────────────────────────────────
 const ongletActif = ref('users')
 
-// ════════════════════════════════════════════════════════════════════════════
-// ONGLET USERS
-// ════════════════════════════════════════════════════════════════════════════
 const { data: users, refresh } = await useFetch('/api/admin/users')
 const roleActif = ref('tous')
 
@@ -27,7 +23,6 @@ const countParRole = computed(() => {
   return c
 })
 
-// ── Édition de rôle inline ────────────────────────────────────────────────────
 const editingUserId = ref(null)
 const editingRole = ref('')
 
@@ -56,7 +51,6 @@ async function saveRole(user) {
   }
 }
 
-// ── Modal création user ───────────────────────────────────────────────────────
 const showModal = ref(false)
 const formEmail = ref('')
 const formPassword = ref('')
@@ -88,7 +82,6 @@ async function creerUser() {
   finally { formLoading.value = false }
 }
 
-// ── Actions sur un user ───────────────────────────────────────────────────────
 const actionLoading = ref(null)
 
 async function toggleActif(user) {
@@ -104,17 +97,13 @@ async function supprimerUser(user) {
   finally { actionLoading.value = null }
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
 const roleLabel = r => ({ manager: 'Manager', rh: 'RH / Juridique', com: 'COM', admin: 'Admin' }[r] || r)
-const roleColor = r => ({ manager: '#3b82f6', rh: '#e24b4a', com: '#f59e0b', admin: '#00a88f' }[r] || '#888')
+const roleColor = r => ({ manager: '#3b82f6', rh: '#e24b4a', com: '#f59e0b', admin: '#4bc0ad' }[r] || '#888')
 function formatDate(iso) {
   if (!iso) return '—'
   return new Date(iso).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: '2-digit' })
 }
 
-// ════════════════════════════════════════════════════════════════════════════
-// ONGLET QR CODES
-// ════════════════════════════════════════════════════════════════════════════
 const BASE_URL = 'http://localhost:3000/signalement'
 const ongletQR = ref('lignes')
 const generatingAll = ref(false)
@@ -157,9 +146,6 @@ async function genererTousQR() {
   }
 }
 
-// ════════════════════════════════════════════════════════════════════════════
-// ONGLET XLS
-// ════════════════════════════════════════════════════════════════════════════
 const isDragging = ref(false); const importing = ref(false); const importResult = ref(null); const importError = ref(null)
 const isDraggingArrets = ref(false); const importingArrets = ref(false); const importResultArrets = ref(null); const importErrorArrets = ref(null)
 
@@ -188,17 +174,11 @@ onMounted(() => { if (ongletActif.value === 'qr') genererTousQR() })
 <template>
   <div class="admin-root">
 
-    <!-- ═══ SIDEBAR ════════════════════════════════════════════════════════ -->
     <aside class="sidebar">
       <div class="sidebar-brand">
-        <div class="logo-wrap">
-          <svg width="20" height="20" viewBox="0 0 28 28" fill="none">
-            <circle cx="14" cy="14" r="13" stroke="white" stroke-width="2" />
-            <path d="M8 14 Q14 6 20 14 Q14 22 8 14Z" fill="white" opacity="0.9" />
-          </svg>
-        </div>
+        <img src="/branding/ratp-mark.png" alt="RATP" class="sidebar-ratp-mark" width="100" height="28" />
         <div>
-          <div><span class="brand-s">Signal</span><span class="brand-r">RATP</span></div>
+          <div><span class="brand-vigie">Vigie</span><span class="brand-r">RATP</span></div>
           <div class="brand-sub">Administration</div>
         </div>
       </div>
@@ -233,10 +213,8 @@ onMounted(() => { if (ongletActif.value === 'qr') genererTousQR() })
       </div>
     </aside>
 
-    <!-- ═══ MAIN ════════════════════════════════════════════════════════════ -->
     <main class="main">
 
-      <!-- ─── ONGLET USERS ─────────────────────────────────────────────── -->
       <template v-if="ongletActif === 'users'">
         <div class="page-header">
           <div>
@@ -281,7 +259,6 @@ onMounted(() => { if (ongletActif.value === 'qr') genererTousQR() })
             <tbody>
               <tr v-for="u in usersFiltres" :key="u.id" :class="{ inactive: !u.actif }">
 
-                <!-- Utilisateur -->
                 <td>
                   <div class="user-cell">
                     <div class="user-avatar" :style="`background:${roleColor(u.role)}22;color:${roleColor(u.role)}`">{{
@@ -294,9 +271,7 @@ onMounted(() => { if (ongletActif.value === 'qr') genererTousQR() })
                   </div>
                 </td>
 
-                <!-- Rôle — éditable inline -->
                 <td>
-                  <!-- Mode édition -->
                   <div v-if="editingUserId === u.id" class="role-edit-wrap">
                     <select v-model="editingRole" class="role-select">
                       <option value="manager">Manager</option>
@@ -308,7 +283,6 @@ onMounted(() => { if (ongletActif.value === 'qr') genererTousQR() })
                       title="Enregistrer">✓</button>
                     <button class="btn-cancel-edit" @click="cancelEditRole" title="Annuler">✕</button>
                   </div>
-                  <!-- Mode affichage -->
                   <div v-else class="role-display">
                     <span class="role-badge"
                       :style="`background:${roleColor(u.role)}18;color:${roleColor(u.role)};border-color:${roleColor(u.role)}40`">{{
@@ -342,7 +316,6 @@ onMounted(() => { if (ongletActif.value === 'qr') genererTousQR() })
         </div>
       </template>
 
-      <!-- ─── ONGLET QR ─────────────────────────────────────────────────── -->
       <template v-if="ongletActif === 'qr'">
         <div class="page-header">
           <div>
@@ -390,7 +363,6 @@ onMounted(() => { if (ongletActif.value === 'qr') genererTousQR() })
         </div>
       </template>
 
-      <!-- ─── ONGLET XLS ─────────────────────────────────────────────────── -->
       <template v-if="ongletActif === 'xls'">
         <div class="page-header">
           <div>
@@ -450,7 +422,6 @@ onMounted(() => { if (ongletActif.value === 'qr') genererTousQR() })
 
     </main>
 
-    <!-- ═══ MODAL CRÉATION USER ════════════════════════════════════════════ -->
     <Transition name="fade">
       <div v-if="showModal" class="modal-overlay" @click.self="showModal = false">
         <div class="modal">
@@ -537,18 +508,15 @@ onMounted(() => { if (ongletActif.value === 'qr') genererTousQR() })
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 
-.logo-wrap {
-  width: 36px;
-  height: 36px;
-  border-radius: 10px;
-  background: linear-gradient(135deg, #1b3f8b, #00a88f);
-  display: flex;
-  align-items: center;
-  justify-content: center;
+.sidebar-ratp-mark {
+  height: 28px;
+  width: auto;
+  max-width: 100px;
+  object-fit: contain;
   flex-shrink: 0;
 }
 
-.brand-s {
+.brand-vigie {
   font-size: 15px;
   font-weight: 700;
   color: #fff;
@@ -557,7 +525,7 @@ onMounted(() => { if (ongletActif.value === 'qr') genererTousQR() })
 .brand-r {
   font-size: 15px;
   font-weight: 700;
-  color: #00a88f;
+  color: #4bc0ad;
 }
 
 .brand-sub {
@@ -598,7 +566,7 @@ onMounted(() => { if (ongletActif.value === 'qr') genererTousQR() })
 
 .nav-item.active {
   background: rgba(0, 168, 143, 0.15);
-  color: #00a88f;
+  color: #4bc0ad;
 }
 
 .nav-icon {
@@ -622,7 +590,7 @@ onMounted(() => { if (ongletActif.value === 'qr') genererTousQR() })
   height: 32px;
   border-radius: 50%;
   background: rgba(0, 168, 143, 0.2);
-  color: #00a88f;
+  color: #4bc0ad;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -647,7 +615,7 @@ onMounted(() => { if (ongletActif.value === 'qr') genererTousQR() })
 
 .profile-role {
   font-size: 10px;
-  color: #00a88f;
+  color: #4bc0ad;
   font-weight: 600;
 }
 
@@ -914,7 +882,7 @@ onMounted(() => { if (ongletActif.value === 'qr') genererTousQR() })
   height: 26px;
   border-radius: 6px;
   border: none;
-  background: #00a88f;
+  background: #4bc0ad;
   color: #fff;
   font-size: 13px;
   cursor: pointer;
@@ -959,7 +927,7 @@ onMounted(() => { if (ongletActif.value === 'qr') genererTousQR() })
 
 .statut-badge.actif {
   background: rgba(0, 168, 143, 0.1);
-  color: #00a88f;
+  color: #4bc0ad;
 }
 
 .statut-badge.inactif {
@@ -1067,8 +1035,8 @@ onMounted(() => { if (ongletActif.value === 'qr') genererTousQR() })
 }
 
 .tab.active {
-  color: #1b3f8b;
-  border-bottom-color: #1b3f8b;
+  color: #004fa3;
+  border-bottom-color: #004fa3;
 }
 
 .qr-grid {
@@ -1123,13 +1091,13 @@ onMounted(() => { if (ongletActif.value === 'qr') genererTousQR() })
 }
 
 .qr-url:hover {
-  color: #00a88f;
+  color: #4bc0ad;
 }
 
 .btn-dl {
   width: 100%;
   padding: 7px;
-  background: #1b3f8b;
+  background: #004fa3;
   color: #fff;
   border: none;
   border-radius: 8px;
@@ -1153,7 +1121,7 @@ onMounted(() => { if (ongletActif.value === 'qr') genererTousQR() })
   width: 24px;
   height: 24px;
   border-radius: 50%;
-  background: #1b3f8b;
+  background: #004fa3;
   color: #fff;
   font-size: 11px;
   font-weight: 700;
@@ -1181,12 +1149,12 @@ onMounted(() => { if (ongletActif.value === 'qr') genererTousQR() })
 }
 
 .drop-zone.active {
-  border-color: #00a88f;
+  border-color: #4bc0ad;
   background: #f0faf8;
 }
 
 .drop-zone.success {
-  border-color: #00a88f;
+  border-color: #4bc0ad;
   border-style: solid;
   background: #f0faf8;
 }
@@ -1205,7 +1173,7 @@ onMounted(() => { if (ongletActif.value === 'qr') genererTousQR() })
   height: 36px;
   border-radius: 50%;
   background: #e8f5f2;
-  color: #00a88f;
+  color: #4bc0ad;
   font-size: 20px;
   font-weight: 600;
   margin-bottom: 8px;
@@ -1214,7 +1182,7 @@ onMounted(() => { if (ongletActif.value === 'qr') genererTousQR() })
 .drop-btn {
   display: inline-block;
   padding: 7px 18px;
-  background: #00a88f;
+  background: #4bc0ad;
   color: #fff;
   border-radius: 999px;
   font-size: 12px;
@@ -1245,7 +1213,7 @@ onMounted(() => { if (ongletActif.value === 'qr') genererTousQR() })
   width: 36px;
   height: 36px;
   border-radius: 50%;
-  background: #00a88f;
+  background: #4bc0ad;
   color: #fff;
   font-size: 16px;
   font-weight: 700;
@@ -1476,7 +1444,7 @@ onMounted(() => { if (ongletActif.value === 'qr') genererTousQR() })
   width: 14px;
   height: 14px;
   border: 2px solid #e2e8f0;
-  border-top-color: #00a88f;
+  border-top-color: #4bc0ad;
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
   flex-shrink: 0;

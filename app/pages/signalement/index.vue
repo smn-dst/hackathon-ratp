@@ -80,27 +80,21 @@ async function soumettre() {
 <template>
   <div class="page">
 
-    <!-- Header RATP -->
     <header class="header">
       <div class="header-inner">
         <div class="header-logo">
-          <div class="logo-circle">
-            <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
-              <circle cx="14" cy="14" r="13" stroke="white" stroke-width="2" />
-              <path d="M8 14 Q14 6 20 14 Q14 22 8 14Z" fill="white" opacity="0.9" />
-            </svg>
-          </div>
-          <span class="logo-text">RATP</span>
+          <img src="/branding/ratp-mark.png" alt="RATP" class="header-ratp-mark" width="100" height="28" />
+          <span class="logo-product"><span class="logo-vigie">Vigie</span><span class="logo-ratp-name">RATP</span></span>
         </div>
         <span class="header-title">Signalement voyageur</span>
       </div>
     </header>
 
-    <!-- Hero band -->
     <div class="hero-band">
       <div class="hero-inner">
+        <img src="/branding/ratp-logo-vertical.png" alt="RATP" class="hero-ratp-lockup" />
         <h1>Déposer un signalement</h1>
-        <p>Votre retour nous aide à améliorer le service</p>
+        <p>Votre retour nous aide à améliorer le service — Paris Est Centre Bus</p>
       </div>
     </div>
 
@@ -309,7 +303,7 @@ async function soumettre() {
 }
 
 .header {
-  background: #1b3f8b;
+  background: #004fa3;
   padding: 0 24px;
 }
 
@@ -328,21 +322,25 @@ async function soumettre() {
   gap: 10px;
 }
 
-.logo-circle {
-  width: 40px;
-  height: 40px;
-  border-radius: 50%;
-  background: #00a88f;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+.header-ratp-mark {
+  height: 28px;
+  width: auto;
+  object-fit: contain;
 }
 
-.logo-text {
-  font-size: 18px;
+.logo-product {
+  display: flex;
+  gap: 2px;
+  font-size: 17px;
   font-weight: 700;
+}
+
+.logo-vigie {
   color: #fff;
-  letter-spacing: 0.05em;
+}
+
+.logo-ratp-name {
+  color: #4bc0ad;
 }
 
 .header-title {
@@ -354,13 +352,21 @@ async function soumettre() {
 }
 
 .hero-band {
-  background: #1b3f8b;
+  background: #004fa3;
   padding: 24px 24px 32px;
 }
 
 .hero-inner {
   max-width: 860px;
   margin: 0 auto;
+}
+
+.hero-ratp-lockup {
+  max-height: 72px;
+  width: auto;
+  object-fit: contain;
+  margin-bottom: 14px;
+  display: block;
 }
 
 .hero-inner h1 {
@@ -405,7 +411,7 @@ async function soumettre() {
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: #00a88f;
+  background: #4bc0ad;
   flex-shrink: 0;
 }
 
@@ -439,7 +445,7 @@ form {
   width: 22px;
   height: 22px;
   border-radius: 50%;
-  background: #1b3f8b;
+  background: #004fa3;
   color: #fff;
   font-size: 11px;
   font-weight: 700;
@@ -522,7 +528,7 @@ textarea {
 select:focus,
 input:focus,
 textarea:focus {
-  border-color: #1b3f8b;
+  border-color: #004fa3;
   box-shadow: 0 0 0 3px rgba(27, 63, 139, 0.1);
 }
 
@@ -557,7 +563,7 @@ button[type="submit"] {
   align-items: center;
   gap: 8px;
   padding: 12px 28px;
-  background: #1b3f8b;
+  background: #004fa3;
   color: #fff;
   border: none;
   border-radius: 999px;
@@ -609,7 +615,7 @@ button[type="submit"]:disabled {
   width: 56px;
   height: 56px;
   border-radius: 50%;
-  background: #00a88f;
+  background: #4bc0ad;
   color: #fff;
   font-size: 24px;
   font-weight: 700;
@@ -636,7 +642,7 @@ button[type="submit"]:disabled {
 
 .btn-new {
   padding: 10px 24px;
-  background: #1b3f8b;
+  background: #004fa3;
   color: #fff;
   border: none;
   border-radius: 999px;
